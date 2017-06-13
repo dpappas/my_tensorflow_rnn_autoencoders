@@ -8,23 +8,23 @@ np.random.seed(1989)
 
 print tf.__version__   # THIS SHOULD BE 1.1.0
 
-# vocab_size  = 1500000
-# b_size      = 20
-# timesteps   = 400
-# emb_size    = 200
-# num_units   = 300
-# stack_size  = 3
-# num_sampled = 10
-# lr          = 1
-
-vocab_size  = 100
-b_size      = 6
-timesteps   = 4
-emb_size    = 10
-num_units   = 20
-stack_size  = 5
+vocab_size  = 1500000
+b_size      = 20
+timesteps   = 400
+emb_size    = 200
+num_units   = 300
+stack_size  = 3
 num_sampled = 10
 lr          = 1
+
+# vocab_size  = 100
+# b_size      = 6
+# timesteps   = 4
+# emb_size    = 10
+# num_units   = 20
+# stack_size  = 5
+# num_sampled = 10
+# lr          = 1
 X = np.random.randint(vocab_size, size=(b_size, timesteps))
 print X
 
@@ -54,45 +54,14 @@ class my_autoencoder(object):
         self.num_sampled = nce_num_sampled
         self.inputs = tf.placeholder(tf.int32, shape=(b_size, timesteps))
         self.lengths = tf.placeholder(tf.int32, shape=(b_size))
+        with tf.device('/cpu:0'):
+            self.embeddings = tf.Variable(tf.random_uniform([vocab_size, emb_size], -1.0, 1.0))
+            self.embed  = tf.nn.embedding_lookup(self.embeddings, self.inputs)
         self.lstms = 0
         self.num_units = num_units
         self.stack_size = stack_size
         self.learning_rate = learning_rate
-        self.init_variables()
-        with tf.device('/cpu:0'):
-            self.embed  = tf.nn.embedding_lookup(self.embeddings, self.inputs)
         self.create_model_1()
-    def init_variables(self):
-        self.embeddings = tf.Variable(
-            initial_value = tf.random_uniform(
-                shape = [
-                    vocab_size,
-                    emb_size
-                ],
-                minval = -1.0,
-                maxval = 1.0,
-            )
-        )
-        self.global_step = tf.Variable(
-            initial_value = 0,
-            trainable     = False,
-        )
-        self.nce_weights = tf.Variable(
-            initial_value = tf.truncated_normal(
-                shape = [
-                    self.vocab_size,
-                    self.num_units
-                ],
-                stddev = 1.0 / math.sqrt(self.num_units)
-            )
-        )
-        self.nce_biases = tf.Variable(
-            initial_value = tf.zeros(
-                shape = [
-                    self.vocab_size
-                ]
-            )
-        )
     def create_lstm_cell(self):
         self.lstms
         with tf.variable_scope("lstm" + str(self.lstms)):
@@ -133,6 +102,7 @@ class my_autoencoder(object):
             capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
             self.optimizer = optimizer.apply_gradients(capped_gvs)
         else:
+            self.global_step = tf.Variable(0, trainable=False)
             self.optimizer = optimizer.minimize(loss=self.loss, global_step=self.global_step)
     def create_model_1(self):
         with tf.device('/gpu:0'):
@@ -150,16 +120,18 @@ class my_autoencoder(object):
             enc_outputs = tf.transpose(self.encoder_outputs, [1, 0, 2])
             decode_input = [tf.zeros_like(enc_outputs[-1], dtype=tf.float32, name="GO") + enc_outputs[-1]] * self.timesteps
             self.decoder_outputs, self.decoder_state = tf.contrib.legacy_seq2seq.rnn_decoder(
-                decoder_inputs  = decode_input,
-                initial_state   = self.encoder_state,
-                cell            = self.create_stack(),
-                loop_function   = loop_f,
+                decoder_inputs=decode_input,
+                initial_state=self.encoder_state,
+                cell=self.create_stack(),
+                loop_function=loop_f,
             )
         with tf.device('/gpu:0'):
             self.compute_loss()
         with tf.device('/cpu:0'):
             self.create_optimizer('sgd', None)
     def compute_loss(self):
+        self.nce_weights = tf.Variable( tf.truncated_normal([self.vocab_size, self.num_units], stddev=1.0 / math.sqrt(self.num_units)))
+        self.nce_biases = tf.Variable(tf.zeros([self.vocab_size]))
         self.loss = tf.constant(0.0, dtype=tf.float32)
         inn = tf.transpose(self.inputs, [1, 0])
         for i in range(len(self.decoder_outputs)):
@@ -186,12 +158,12 @@ ae = my_autoencoder(
     learning_rate   = lr,
 )
 
-print_every_n_batches                               = 500
-config                                              = tf.ConfigProto()
-config.allow_soft_placement                         = True
-config.log_device_placement                         = False
-config.gpu_options.allow_growth                     = False
-config.gpu_options.per_process_gpu_memory_fraction  = 0.8
+print_every_n_batches = 500
+config = tf.ConfigProto()
+config.allow_soft_placement=True
+config.log_device_placement = False
+config.gpu_options.allow_growth = False
+config.gpu_options.per_process_gpu_memory_fraction = 0.8
 
 sess = tf.Session(config=config)
 sess.run(tf.global_variables_initializer())
@@ -238,6 +210,7 @@ for epoch in range(20):
     meta_graph_def = tf.train.export_meta_graph(filename = './my_limited_model_'+str(epoch)+'.meta')
 
 sess.close()
+
 
 '''
 

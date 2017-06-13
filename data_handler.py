@@ -10,6 +10,7 @@ except:
 import elasticsearch
 from elasticsearch.helpers import scan
 from pprint import pprint
+np.random.seed(1989)
 
 
 
