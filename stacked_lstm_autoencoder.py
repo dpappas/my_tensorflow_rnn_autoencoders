@@ -193,8 +193,8 @@ config.log_device_placement                         = False
 config.gpu_options.allow_growth                     = False
 config.gpu_options.per_process_gpu_memory_fraction  = 0.8
 
-sess = tf.Session(config=config)
-sess.run(tf.global_variables_initializer())
+sess = tf.Session( config = config )
+sess.run( tf.global_variables_initializer() )
 saver = tf.train.Saver()
 import os
 import cPickle as pickle
