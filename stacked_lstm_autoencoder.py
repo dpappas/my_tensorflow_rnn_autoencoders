@@ -48,8 +48,11 @@ class my_autoencoder(object):
             stack_size,
             nce_num_sampled,
             learning_rate,
+            mlp_size,
     ):
         self.timesteps = timesteps
+        self.mlp_size = mlp_size
+        self.emb_size = emb_size
         self.vocab_size = vocab_size
         self.num_sampled = nce_num_sampled
         self.inputs = tf.placeholder(tf.int32, shape=(b_size, timesteps))
@@ -66,8 +69,8 @@ class my_autoencoder(object):
         self.embeddings = tf.Variable(
             initial_value = tf.random_uniform(
                 shape = [
-                    vocab_size,
-                    emb_size
+                    self.vocab_size,
+                    self.emb_size
                 ],
                 minval = -1.0,
                 maxval = 1.0,
@@ -76,6 +79,21 @@ class my_autoencoder(object):
         self.global_step = tf.Variable(
             initial_value = 0,
             trainable     = False,
+        )
+        self.mlp_weights = tf.Variable(
+            initial_value = tf.random_normal(
+                shape = [
+                    num_units,
+                    self.mlp_size,
+                ]
+            )
+        )
+        self.bias = tf.Variable(
+            initial_value = tf.random_normal(
+                shape = [
+                    self.mlp_size,
+                ]
+            )
         )
         self.nce_weights = tf.Variable(
             initial_value = tf.truncated_normal(
