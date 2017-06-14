@@ -26,7 +26,7 @@ class instanciator(object):
         self.max_len = max_len
         self.min_len = min_len
         self.index = index_name
-        self.client = elasticsearch.Elasticsearch(elasticsearch_ip, verify_certs=True)
+        self.client = elasticsearch.Elasticsearch(elasticsearch_ip, verify_certs=True, timeout=45, max_retries=10, retry_on_timeout=True)
         self.vocab_path = vocab_path
         self.load_vocab()
     def load_vocab(self):
@@ -59,7 +59,7 @@ class instanciator(object):
         scroll = scan(self.client, index=self.index, query=None,
                       scroll=u'5m', raise_on_error=True,
                       preserve_order=False, size=1000,
-                      request_timeout=None, clear_scroll=True)
+                      request_timeout=45, clear_scroll=True)
         for res in scroll:
             tokens = self.tokenize(res['_source']['AbstractText'])
             if(len(tokens)< self.max_len and len(tokens) > self.min_len ):
@@ -73,16 +73,16 @@ class instanciator(object):
                 yield t, len(tokens)
 
 
-inst = instanciator(
-    vocab_path          = '/home/dpappas/my_bio_vocab.p',
-    elasticsearch_ip    = '',
-    index_name          = '',
-)
-
-
-yielder = inst.yield_data()
-for t in yielder:
-    print t[1] , t[0]
+# inst = instanciator(
+#     vocab_path          = '',
+#     elasticsearch_ip    = '',
+#     index_name          = '',
+# )
+#
+#
+# yielder = inst.yield_data()
+# for t in yielder:
+#     print t[1] , t[0]
 
 
 

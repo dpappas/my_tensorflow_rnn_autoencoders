@@ -25,16 +25,17 @@ num_units   = 20
 stack_size  = 5
 num_sampled = 10
 lr          = 1
+
 X = np.random.randint(vocab_size, size=(b_size, timesteps))
 print X
 
-import logging
-logger = logging.getLogger('stacked_lstm_autoencoder')
-hdlr = logging.FileHandler('/home/dpappas/my_stacked_lstm_autoencoder.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-hdlr.setFormatter(formatter)
-logger.addHandler(hdlr)
-logger.setLevel(logging.INFO)
+# import logging
+# logger = logging.getLogger('stacked_lstm_autoencoder')
+# hdlr = logging.FileHandler('/home/dpappas/my_stacked_lstm_autoencoder.log')
+# formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+# hdlr.setFormatter(formatter)
+# logger.addHandler(hdlr)
+# logger.setLevel(logging.INFO)
 
 
 class my_autoencoder(object):
@@ -112,7 +113,6 @@ class my_autoencoder(object):
             )
         )
     def create_lstm_cell(self):
-        self.lstms
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
             return tf.contrib.rnn.core_rnn_cell.LSTMCell(
@@ -202,6 +202,7 @@ ae = my_autoencoder(
     stack_size      = stack_size,
     nce_num_sampled = num_sampled,
     learning_rate   = lr,
+    mlp_size        = 100,
 )
 
 print_every_n_batches                               = 500
@@ -235,7 +236,15 @@ for epoch in range(20):
             },
         )
         sum_cost += l
-        logger.info(
+        # logger.info(
+        #     'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format(
+        #         m_batches,
+        #         epoch,
+        #         '{0:.4f}'.format(l),
+        #         '{0:.4f}'.format((sum_cost/(m_batches*1.0))),
+        #     )
+        # )
+        print (
             'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format(
                 m_batches,
                 epoch,
@@ -252,7 +261,8 @@ for epoch in range(20):
             )
         )
     save_path = saver.save(sess, './my_stacked_lstm_autoencoder_'+str(epoch)+'.ckpt')
-    logger.info('save_path: {}'.format( save_path ))
+    # logger.info('save_path: {}'.format( save_path ))
+    print('save_path: {}'.format( save_path ))
     meta_graph_def = tf.train.export_meta_graph(filename = './my_limited_model_'+str(epoch)+'.meta')
 
 sess.close()
