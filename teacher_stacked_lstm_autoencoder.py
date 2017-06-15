@@ -20,10 +20,10 @@ print_every_n_batches = 500
 
 vocab_size  = 100
 b_size      = 6
-timesteps   = 4
-emb_size    = 25
-num_units   = 20
-stack_size  = 5
+timesteps   = 400
+emb_size    = 300
+num_units   = 1200
+stack_size  = 2
 num_sampled = 10
 lr          = 1
 
@@ -178,9 +178,52 @@ class my_autoencoder(object):
             self.compute_loss()
         with tf.device('/cpu:0'):
             self.create_optimizer('sgd', None)
+    def body(self,i, lllll):
+        l = tf.reduce_mean(
+            tf.nn.nce_loss(
+                weights=self.nce_weights,
+                biases=self.nce_biases,
+                labels=tf.reshape(
+                    tf.gather(
+                        self.inn,
+                        i
+                    ),
+                    [-1, 1]
+                ),
+                inputs=tf.gather(
+                    self.decoder_outputs,
+                    i,
+                ),
+                num_sampled=self.num_sampled,
+                num_classes=self.vocab_size,
+            )
+        )
+        lllll += l
+        return [tf.add(i, 1), lllll]
+    def compute_loss_with_while(self):
+        self.loss = tf.constant(0.0, dtype=tf.float32)
+        self.inn = tf.reverse_sequence(
+            input       = self.inputs,
+            seq_lengths = self.lengths,
+            seq_axis    = 1,
+            batch_axis  = 0,
+        )
+        self.inn = tf.transpose(self.inn, [1, 0])
+        print self.inn.get_shape()
+        max_len = tf.reduce_max( input_tensor = self.lengths , axis = None, keep_dims = False, name = None, reduction_indices=None, )
+        i = tf.constant(0)
+        while_condition = lambda i, lllll : tf.less(i, max_len)
+        self.decoder_outputs = tf.stack(self.decoder_outputs)
+        i, self.loss, = tf.while_loop( while_condition, self.body, [ i, self.loss, ] )
     def compute_loss(self):
         self.loss = tf.constant(0.0, dtype=tf.float32)
-        inn = tf.transpose(self.inputs, [1, 0])
+        inn = tf.reverse_sequence(
+            input       = self.inputs,
+            seq_lengths = self.lengths,
+            seq_axis    = 1,
+            batch_axis  = 0,
+        )
+        inn = tf.transpose(inn, [1, 0])
         for i in range(len(self.decoder_outputs)):
             l = tf.reduce_mean(
                 tf.nn.nce_loss(
@@ -192,7 +235,7 @@ class my_autoencoder(object):
                     num_classes = self.vocab_size,
                 )
             )
-            self.loss += l # / len(self.decoder_outputs)
+            self.loss += l
 
 ae = my_autoencoder(
     b_size          = b_size,
@@ -223,15 +266,13 @@ for i in range(1000):
         },
     )
     print l
-
-
 sess.close()
 
 
 exit()
 
 
-sess = tf.Session(config=config)
+sess = tf.Session(config=get_config())
 sess.run(tf.global_variables_initializer())
 saver = tf.train.Saver()
 import os
@@ -296,5 +337,30 @@ d['context'].shape # 100, 500
 d['quests'].shape
 c_len = (d['context'] != 0).sum(1)
 q_len = (d['quests'] != 0).sum(1)
+
+
+
+# the predicate for stopping the while loop. Tensorflow demands that we have
+# all of the variables used in the while loop in the predicate.
+pred = lambda prob,counter,state,input,acc_states,acc_output,acc_probs:\
+    tf.logical_and(tf.less(prob,self.one_minus_eps), tf.less(counter,self.N))
+
+def ACTStep(self,prob, counter, state, input, acc_states, acc_outputs, acc_probs):
+    #
+    #run rnn once
+    output, new_state = rnn.rnn(self.cell, [input], state, scope=type(self.cell).__name__)
+    #
+    prob_w = tf.get_variable("prob_w", [self.cell.input_size,1]) 
+    prob_b = tf.get_variable("prob_b", [1])
+    halting_probability = tf.nn.sigmoid(tf.matmul(prob_w,new_state) + prob_b) 
+    #
+    acc_states.append(new_state)
+    acc_outputs.append(output)
+    acc_probs.append(halting_probability) 
+    #
+    return [p + prob, counter + 1.0, new_state, input,acc_states,acc_outputs,acc_probs]
+
+
+
 
 '''

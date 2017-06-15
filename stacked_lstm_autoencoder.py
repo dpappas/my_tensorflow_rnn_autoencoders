@@ -7,6 +7,7 @@ tf.set_random_seed(1989)
 np.random.seed(1989)
 
 print tf.__version__   # THIS SHOULD BE 1.1.0
+print_every_n_batches = 500
 
 # vocab_size  = 1500000
 # b_size      = 20
@@ -19,10 +20,10 @@ print tf.__version__   # THIS SHOULD BE 1.1.0
 
 vocab_size  = 100
 b_size      = 6
-timesteps   = 4
+timesteps   = 40
 emb_size    = 10
 num_units   = 20
-stack_size  = 5
+stack_size  = 3
 num_sampled = 10
 lr          = 1
 
@@ -37,6 +38,13 @@ print X
 # logger.addHandler(hdlr)
 # logger.setLevel(logging.INFO)
 
+def get_config():
+    config = tf.ConfigProto()
+    config.allow_soft_placement=True
+    config.log_device_placement = False
+    config.gpu_options.allow_growth = False
+    config.gpu_options.per_process_gpu_memory_fraction = 0.8
+    return config
 
 class my_autoencoder(object):
     def __init__(
@@ -179,7 +187,15 @@ class my_autoencoder(object):
             self.create_optimizer('sgd', None)
     def compute_loss(self):
         self.loss = tf.constant(0.0, dtype=tf.float32)
-        inn = tf.transpose(self.inputs, [1, 0])
+        inn = tf.reverse_sequence(
+            input=self.inputs,
+            seq_lengths=self.lengths,
+            seq_axis=1,
+            batch_axis=0,
+
+        )
+        inn = tf.transpose(inn, [1, 0])
+        # inn = tf.transpose(self.inputs, [1, 0])
         for i in range(len(self.decoder_outputs)):
             l = tf.reduce_mean(
                 tf.nn.nce_loss(
@@ -205,12 +221,30 @@ ae = my_autoencoder(
     mlp_size        = 100,
 )
 
-print_every_n_batches                               = 500
-config                                              = tf.ConfigProto()
-config.allow_soft_placement                         = True
-config.log_device_placement                         = False
-config.gpu_options.allow_growth                     = False
-config.gpu_options.per_process_gpu_memory_fraction  = 0.8
+X = np.random.randint(vocab_size, size=(b_size, timesteps))
+lens = (X != 0).sum(1)
+# print X
+sess = tf.Session(config=get_config())
+sess.run(tf.global_variables_initializer())
+for i in range(1000):
+    _, l = sess.run(
+        [
+            ae.optimizer,
+            ae.loss
+        ],
+        feed_dict={
+            ae.inputs: X,
+            ae.lengths: lens,
+        },
+    )
+    print l
+sess.close()
+
+
+exit()
+
+
+
 
 sess = tf.Session( config = config )
 sess.run( tf.global_variables_initializer() )
