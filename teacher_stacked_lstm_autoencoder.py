@@ -18,13 +18,13 @@ print_every_n_batches = 500
 # num_sampled = 10
 # lr          = 1
 
-vocab_size  = 100
-b_size      = 6
+vocab_size  = 1500000
+b_size      = 400
 timesteps   = 400
 emb_size    = 300
-num_units   = 1200
-stack_size  = 2
-num_sampled = 10
+num_units   = 1500
+stack_size  = 1
+num_sampled = 100
 lr          = 1
 
 # import logging
@@ -37,7 +37,7 @@ lr          = 1
 
 def get_config():
     config = tf.ConfigProto()
-    config.allow_soft_placement=True
+    config.allow_soft_placement = True
     config.log_device_placement = False
     config.gpu_options.allow_growth = False
     config.gpu_options.per_process_gpu_memory_fraction = 0.8
@@ -72,35 +72,9 @@ class my_autoencoder(object):
             # print self.embed.get_shape()
         self.create_model_1()
     def init_variables(self):
-        self.embeddings = tf.Variable(
-            initial_value = tf.random_uniform(
-                shape = [
-                    self.vocab_size,
-                    self.emb_size
-                ],
-                minval = -1.0,
-                maxval = 1.0,
-            )
-        )
         self.global_step = tf.Variable(
             initial_value = 0,
             trainable     = False,
-        )
-        self.nce_weights = tf.Variable(
-            initial_value = tf.truncated_normal(
-                shape = [
-                    self.vocab_size,
-                    self.num_units
-                ],
-                stddev = 1.0 / math.sqrt(self.num_units)
-            )
-        )
-        self.nce_biases = tf.Variable(
-            initial_value = tf.zeros(
-                shape = [
-                    self.vocab_size
-                ]
-            )
         )
         self.go = tf.Variable(
             initial_value=tf.random_uniform(
@@ -113,6 +87,33 @@ class my_autoencoder(object):
         )
         self.go = tf.stack(b_size * [self.go])
         # print self.go.get_shape()
+        with tf.device('/cpu:0'):
+            self.embeddings = tf.Variable(
+                initial_value = tf.random_uniform(
+                    shape = [
+                        self.vocab_size,
+                        self.emb_size
+                    ],
+                    minval = -1.0,
+                    maxval = 1.0,
+                )
+            )
+            self.nce_weights = tf.Variable(
+                initial_value = tf.truncated_normal(
+                    shape = [
+                        self.vocab_size,
+                        self.num_units
+                    ],
+                    stddev = 1.0 / math.sqrt(self.num_units)
+                )
+            )
+            self.nce_biases = tf.Variable(
+                initial_value = tf.zeros(
+                    shape = [
+                        self.vocab_size
+                    ]
+                )
+            )
     def create_lstm_cell(self):
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
@@ -163,7 +164,7 @@ class my_autoencoder(object):
                 dtype               = tf.float32,
                 parallel_iterations = None,
             )
-        with tf.device('/gpu:1'):
+        with tf.device('/gpu:0'):
             decode_input = [
                 self.go
             ] + tf.unstack(tf.transpose(self.embed, [1, 0, 2]))[:-1]
@@ -177,7 +178,7 @@ class my_autoencoder(object):
         with tf.device('/gpu:0'):
             self.compute_loss()
         with tf.device('/cpu:0'):
-            self.create_optimizer('sgd', None)
+            self.create_optimizer('sgd', 'norm')
     def body(self,i, lllll):
         l = tf.reduce_mean(
             tf.nn.nce_loss(
@@ -266,6 +267,7 @@ for i in range(1000):
         },
     )
     print l
+
 sess.close()
 
 
