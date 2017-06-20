@@ -322,31 +322,23 @@ sess.close()
 
 
 '''
-
 import pickle
 import os
-
 p = '/home/dpappas/koutsouremeno_dataset/train/'
 fs = os.listdir(p)
-
 maxx = 0
 for f in fs:
     d = pickle.load(open(p+f,'rb'))
     print d['context'].max()
     break
-
 d['context'].shape # 100, 500
 d['quests'].shape
 c_len = (d['context'] != 0).sum(1)
 q_len = (d['quests'] != 0).sum(1)
-
-
-
 # the predicate for stopping the while loop. Tensorflow demands that we have
 # all of the variables used in the while loop in the predicate.
 pred = lambda prob,counter,state,input,acc_states,acc_output,acc_probs:\
     tf.logical_and(tf.less(prob,self.one_minus_eps), tf.less(counter,self.N))
-
 def ACTStep(self,prob, counter, state, input, acc_states, acc_outputs, acc_probs):
     #
     #run rnn once
@@ -361,8 +353,4 @@ def ACTStep(self,prob, counter, state, input, acc_states, acc_outputs, acc_probs
     acc_probs.append(halting_probability) 
     #
     return [p + prob, counter + 1.0, new_state, input,acc_states,acc_outputs,acc_probs]
-
-
-
-
 '''

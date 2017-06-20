@@ -302,22 +302,17 @@ for epoch in range(20):
 sess.close()
 
 '''
-
 import pickle
 import os
-
 p = '/home/dpappas/koutsouremeno_dataset/train/'
 fs = os.listdir(p)
-
 maxx = 0
 for f in fs:
     d = pickle.load(open(p+f,'rb'))
     print d['context'].max()
     break
-
 d['context'].shape # 100, 500
 d['quests'].shape
 c_len = (d['context'] != 0).sum(1)
 q_len = (d['quests'] != 0).sum(1)
-
 '''
