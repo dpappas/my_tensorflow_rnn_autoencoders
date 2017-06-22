@@ -1,3 +1,4 @@
+
 import numpy as np
 import tensorflow as tf
 from pprint import pprint
@@ -21,11 +22,11 @@ print_every_n_batches = 500
 vocab_size  = 1500000
 b_size      = 400
 timesteps   = 400
-emb_size    = 300
-num_units   = 1500
+emb_size    = 200
+num_units   = 600
 stack_size  = 1
-num_sampled = 100
-lr          = 1
+num_sampled = 64
+lr          = 0.1
 
 # import logging
 # logger = logging.getLogger('stacked_lstm_autoencoder')
@@ -54,6 +55,7 @@ class my_autoencoder(object):
             stack_size,
             nce_num_sampled,
             learning_rate,
+            momentum        = 0.8,
     ):
         self.b_size         = b_size
         self.emb_size       = emb_size
@@ -61,6 +63,8 @@ class my_autoencoder(object):
         self.vocab_size     = vocab_size
         self.num_sampled    = nce_num_sampled
         self.lstms          = 0
+        self.grus           = 0
+        self.momentum       = momentum
         self.num_units      = num_units
         self.stack_size     = stack_size
         self.learning_rate  = learning_rate
@@ -117,7 +121,7 @@ class my_autoencoder(object):
     def create_lstm_cell(self):
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
-            return tf.contrib.rnn.core_rnn_cell.LSTMCell(
+            ret = tf.contrib.rnn.core_rnn_cell.LSTMCell(
                 num_units = self.num_units,
                 input_size=None,
                 use_peepholes=False,
@@ -131,17 +135,33 @@ class my_autoencoder(object):
                 state_is_tuple=True,
                 activation=tf.tanh,
             )
+            # tf.summary.histogram("lstm" + str(self.lstms), ret)
+            return ret
+    def create_gru_cell(self):
+        with tf.variable_scope("gru" + str(self.grus)):
+            self.grus += 1
+            ret = tf.contrib.rnn.GRUCell( num_units = self.num_units, input_size=None, activation=tf.tanh )
+            # tf.summary.histogram("gru" + str(self.grus), ret)
+            return ret
     def create_stack(self):
         cells = [
             tf.contrib.rnn.core_rnn_cell.DropoutWrapper(
-                cell = self.create_lstm_cell()
+                # cell = self.create_lstm_cell()
+                cell = self.create_gru_cell()
             ) for i in range(self.stack_size)
         ]
         stacked_lstm = tf.contrib.rnn.core_rnn_cell.MultiRNNCell(cells = cells)
         return stacked_lstm
-    def create_optimizer(self, opt, clip_by):
+    def create_optimizer( self, opt, clip_by, ):
         if(opt.lower() == 'sgd'):
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate)
+        elif(opt.lower() == 'momentum'):
+            optimizer = tf.train.MomentumOptimizer(
+                learning_rate   = self.learning_rate,
+                momentum        = self.momentum,
+                use_locking     = False,
+                use_nesterov    = False,
+            )
         else:
             optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
         if(clip_by == 'norm'):
@@ -155,30 +175,41 @@ class my_autoencoder(object):
         else:
             self.optimizer = optimizer.minimize(loss=self.loss, global_step=self.global_step)
     def create_model_1(self):
-        with tf.device('/gpu:0'):
-            self.encoder_outputs, self.encoder_state = tf.nn.dynamic_rnn(
-                cell                = self.create_stack(),
-                inputs              = self.embed,
-                sequence_length     = self.lengths,
-                initial_state       = None,
-                dtype               = tf.float32,
-                parallel_iterations = None,
-            )
-        with tf.device('/gpu:0'):
-            decode_input = [
-                self.go
-            ] + tf.unstack(tf.transpose(self.embed, [1, 0, 2]))[:-1]
-            # pprint(decode_input)
-            self.decoder_outputs, self.decoder_state = tf.contrib.legacy_seq2seq.rnn_decoder(
-                decoder_inputs  = decode_input,
-                initial_state   = self.encoder_state,
-                cell            = self.create_stack(),
-                loop_function   = None,
-            )
-        with tf.device('/gpu:0'):
-            self.compute_loss()
-        with tf.device('/cpu:0'):
-            self.create_optimizer('sgd', 'norm')
+        with tf.name_scope('encoder'):
+            with tf.device('/gpu:0'):
+                self.encoder_outputs, self.encoder_state = tf.nn.dynamic_rnn(
+                    cell                = self.create_stack(),
+                    inputs              = self.embed,
+                    sequence_length     = self.lengths,
+                    initial_state       = None,
+                    dtype               = tf.float32,
+                    parallel_iterations = None,
+                )
+                tf.summary.histogram("encoder_state", self.encoder_state)
+                tf.summary.histogram("encoder_outputs", self.encoder_outputs)
+        with tf.name_scope('decoder'):
+            with tf.device('/gpu:1'):
+                decode_input = [
+                    self.go
+                ] + tf.unstack(tf.transpose(self.embed, [1, 0, 2]))[:-1]
+                # pprint(decode_input)
+                self.decoder_outputs, self.decoder_state = tf.contrib.legacy_seq2seq.rnn_decoder(
+                    decoder_inputs  = decode_input,
+                    initial_state   = self.encoder_state,
+                    cell            = self.create_stack(),
+                    loop_function   = None,
+                )
+                tf.summary.histogram("decoder_state", self.decoder_state)
+                tf.summary.histogram("decoder_outputs", self.decoder_outputs)
+        with tf.name_scope('loss'):
+            with tf.device('/gpu:0'):
+                self.compute_loss()
+                tf.summary.scalar('sum_of_nce_losses',self.loss)
+        with tf.name_scope('optimizer'):
+            with tf.device('/gpu:1'):
+                self.create_optimizer('sgd', '')
+                # self.create_optimizer('adam', 'norm')
+                # self.create_optimizer('momentum', 'norm')
     def body(self,i, lllll):
         l = tf.reduce_mean(
             tf.nn.nce_loss(
@@ -253,19 +284,24 @@ ae = my_autoencoder(
 X = np.random.randint(vocab_size, size=(b_size, timesteps))
 lens = (X != 0).sum(1)
 # print X
-sess = tf.Session(config=get_config())
+sess    = tf.Session(config=get_config())
+merge_summary = tf.summary.merge_all()
+writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
+writer.add_graph(sess.graph)
 sess.run(tf.global_variables_initializer())
 for i in range(1000):
-    _, l = sess.run(
+    _, l, ms = sess.run(
         [
             ae.optimizer,
-            ae.loss
+            ae.loss,
+            merge_summary,
         ],
         feed_dict={
             ae.inputs: X,
             ae.lengths: lens,
         },
     )
+    writer.add_summary(ms, i)
     print l
 
 sess.close()
@@ -353,4 +389,17 @@ def ACTStep(self,prob, counter, state, input, acc_states, acc_outputs, acc_probs
     acc_probs.append(halting_probability) 
     #
     return [p + prob, counter + 1.0, new_state, input,acc_states,acc_outputs,acc_probs]
+
+
+import tensorflow as tf
+ttt = tf.Variable(tf.random_normal([10, 10, 10]))
+t = tf.contrib.rnn.core_rnn_cell.LSTMCell(10)
+c = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(t)
+stacked_lstm = tf.contrib.rnn.core_rnn_cell.MultiRNNCell(cells = [c])
+encoder_outputs, encoder_state = tf.nn.dynamic_rnn(stacked_lstm,ttt, dtype=tf.float32)
+
+tf.trainable_variables()
+
+
+
 '''
