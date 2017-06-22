@@ -1,6 +1,8 @@
 
 import numpy as np
 import tensorflow as tf
+import os
+import cPickle as pickle
 from pprint import pprint
 import math
 tf.reset_default_graph()
@@ -19,22 +21,31 @@ print_every_n_batches = 500
 # num_sampled = 10
 # lr          = 1
 
+# vocab_size  = 2500000
+# b_size      = 4000
+# timesteps   = 400
+# emb_size    = 200
+# num_units   = 600
+# stack_size  = 1
+# num_sampled = 64
+# lr          = 0.1
+
 vocab_size  = 1500000
 b_size      = 400
-timesteps   = 400
+timesteps   = 20
 emb_size    = 200
 num_units   = 600
 stack_size  = 1
 num_sampled = 64
-lr          = 0.1
+lr          = 1.0
 
-# import logging
-# logger = logging.getLogger('stacked_lstm_autoencoder')
-# hdlr = logging.FileHandler('/home/dpappas/my_stacked_lstm_autoencoder.log')
-# formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-# hdlr.setFormatter(formatter)
-# logger.addHandler(hdlr)
-# logger.setLevel(logging.INFO)
+import logging
+logger = logging.getLogger('stacked_gru_autoencoder')
+hdlr = logging.FileHandler('/home/dpappas/my_stacked_gru_autoencoder.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr)
+logger.setLevel(logging.INFO)
 
 def get_config():
     config = tf.ConfigProto()
@@ -76,48 +87,17 @@ class my_autoencoder(object):
             # print self.embed.get_shape()
         self.create_model_1()
     def init_variables(self):
-        self.global_step = tf.Variable(
-            initial_value = 0,
-            trainable     = False,
-        )
-        self.go = tf.Variable(
-            initial_value=tf.random_uniform(
-                shape=[ self.emb_size, ],
-                minval=-1.0,
-                maxval=1.0,
-            ),
-            dtype=tf.float32,
-            name="GO",
-        )
+        self.global_step = tf.Variable( initial_value = 0, trainable = False, )
+        self.go = tf.Variable( initial_value=tf.random_uniform( shape=[ self.emb_size, ], minval=-1.0, maxval=1.0, ), dtype=tf.float32, name="GO", )
         self.go = tf.stack(b_size * [self.go])
         # print self.go.get_shape()
         with tf.device('/cpu:0'):
-            self.embeddings = tf.Variable(
-                initial_value = tf.random_uniform(
-                    shape = [
-                        self.vocab_size,
-                        self.emb_size
-                    ],
-                    minval = -1.0,
-                    maxval = 1.0,
-                )
-            )
-            self.nce_weights = tf.Variable(
-                initial_value = tf.truncated_normal(
-                    shape = [
-                        self.vocab_size,
-                        self.num_units
-                    ],
-                    stddev = 1.0 / math.sqrt(self.num_units)
-                )
-            )
-            self.nce_biases = tf.Variable(
-                initial_value = tf.zeros(
-                    shape = [
-                        self.vocab_size
-                    ]
-                )
-            )
+            # self.embeddings = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size, self.emb_size, ], minval = -1.0, maxval = 1.0, ) )
+            self.embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.emb_size, ], stddev = 1.0 / math.sqrt(self.emb_size) ) )
+            # self.nce_weights = tf.Variable( initial_value = tf.random_uniform( shape = [ self.vocab_size, self.num_units ], minval = -1.0, maxval = 1.0, ) )
+            self.nce_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.num_units ], stddev = 1.0 / math.sqrt(self.num_units) ) )
+            # self.nce_biases = tf.Variable( initial_value = tf.zeros( shape = [ self.vocab_size ] ) )
+            self.nce_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size ], minval = 0.1, maxval = 0.9 ) )
     def create_lstm_cell(self):
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
@@ -204,6 +184,7 @@ class my_autoencoder(object):
         with tf.name_scope('loss'):
             with tf.device('/gpu:0'):
                 self.compute_loss()
+                # self.compute_loss_with_while()
                 tf.summary.scalar('sum_of_nce_losses',self.loss)
         with tf.name_scope('optimizer'):
             with tf.device('/gpu:1'):
@@ -280,7 +261,7 @@ ae = my_autoencoder(
     learning_rate   = lr,
 )
 
-
+'''
 X = np.random.randint(vocab_size, size=(b_size, timesteps))
 lens = (X != 0).sum(1)
 # print X
@@ -306,52 +287,48 @@ for i in range(1000):
 
 sess.close()
 
-
 exit()
 
+p = '/home/dpappas/koutsouremeno_dataset/train/'
+'''
 
 sess = tf.Session(config=get_config())
 sess.run(tf.global_variables_initializer())
 saver = tf.train.Saver()
-import os
-import cPickle as pickle
-p = '/home/dpappas/koutsouremeno_dataset/train/'
-fs = os.listdir(p)
+
+def yield_data(p):
+    fs = os.listdir(p)
+    ret = None
+    for f in fs:
+        d = pickle.load(open(p+f,'rb'))
+        if(ret is None):
+            ret = d['context']
+        else:
+            ret = np.append(ret, d['context'], axis=0)
+        if(ret.shape[0] == b_size):
+            yield ret
+            ret = None
 
 for epoch in range(20):
+    #
     sum_cost, m_batches = 0. , 0.
-    for f in fs:
+    for train_dato in yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/'):
         m_batches+=1
-        d = pickle.load(open(p+f,'rb'))
-        _, l = sess.run(
-            [
-                ae.optimizer,
-                ae.loss
-            ],
-            feed_dict = {
-                ae.inputs  : d['context'],
-                ae.lengths : (d['context'] != 0).sum(1),
-            },
-        )
-        sum_cost += l
-        # logger.info(
-        #     'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format(
-        #         m_batches,
-        #         epoch,
-        #         '{0:.4f}'.format(l),
-        #         '{0:.4f}'.format((sum_cost/(m_batches*1.0))),
-        #     )
-        # )
-        print(
-            'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format(
-                m_batches,
-                epoch,
-                '{0:.4f}'.format(l),
-                '{0:.4f}'.format((sum_cost/(m_batches*1.0))),
-            )
-        )
-    save_path = saver.save(sess, './my_stacked_lstm_autoencoder_'+str(epoch)+'.ckpt')
-    # logger.info('save_path: {}'.format( save_path ))
+        _, lll = sess.run( [ ae.optimizer, ae.loss ], feed_dict = { ae.inputs : train_dato, ae.lengths : (train_dato != 0).sum(1), },)
+        sum_cost += lll
+        logger.info( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+        print( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    #
+    sum_cost, m_batches = 0. , 0.
+    for valid_dato in yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/'):
+        m_batches+=1
+        _, lll = sess.run( [ ae.optimizer, ae.loss ], feed_dict = { ae.inputs : valid_dato, ae.lengths : (valid_dato != 0).sum(1), },)
+        sum_cost += lll
+    logger.info( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    print( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    #
+    save_path = saver.save(sess, './my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
+    logger.info('save_path: {}'.format( save_path ))
     meta_graph_def = tf.train.export_meta_graph(filename = './my_limited_model_'+str(epoch)+'.meta')
 
 sess.close()
@@ -400,6 +377,19 @@ encoder_outputs, encoder_state = tf.nn.dynamic_rnn(stacked_lstm,ttt, dtype=tf.fl
 
 tf.trainable_variables()
 
+
+
+'''
+
+
+'''
+
+t = '/media/dpappas/dpappas_data/biomedical/my_bio_vocab.p'                 # 1061900
+t = '/media/dpappas/dpappas_data/biomedical/my_koutsour_vocab.p'            # 423154
+t = '/media/dpappas/dpappas_data/biomedical/my_koutsour_vocab_final.p'      # 1061900
+
+import cPickle as pickle
+v = pickle.load(open(t,'rb'))
 
 
 '''
