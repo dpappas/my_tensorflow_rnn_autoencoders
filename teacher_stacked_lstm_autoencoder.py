@@ -86,6 +86,17 @@ class my_autoencoder(object):
             self.embed      = tf.nn.embedding_lookup(self.embeddings, self.inputs)
             # print self.embed.get_shape()
         self.create_model_1()
+    def variable_summaries(self,var):
+        """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+        with tf.name_scope('summaries'):
+            mean = tf.reduce_mean(var)
+            tf.summary.scalar('mean', mean)
+            with tf.name_scope('stddev'):
+                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+            tf.summary.scalar('stddev', stddev)
+            tf.summary.scalar('max', tf.reduce_max(var))
+            tf.summary.scalar('min', tf.reduce_min(var))
+            tf.summary.histogram('histogram', var)
     def init_variables(self):
         self.global_step = tf.Variable( initial_value = 0, trainable = False, )
         self.go = tf.Variable( initial_value=tf.random_uniform( shape=[ self.emb_size, ], minval=-1.0, maxval=1.0, ), dtype=tf.float32, name="GO", )
@@ -93,11 +104,12 @@ class my_autoencoder(object):
         # print self.go.get_shape()
         with tf.device('/cpu:0'):
             # self.embeddings = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size, self.emb_size, ], minval = -1.0, maxval = 1.0, ) )
-            self.embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.emb_size, ], stddev = 1.0 / math.sqrt(self.emb_size) ) )
             # self.nce_weights = tf.Variable( initial_value = tf.random_uniform( shape = [ self.vocab_size, self.num_units ], minval = -1.0, maxval = 1.0, ) )
-            self.nce_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.num_units ], stddev = 1.0 / math.sqrt(self.num_units) ) )
             # self.nce_biases = tf.Variable( initial_value = tf.zeros( shape = [ self.vocab_size ] ) )
-            self.nce_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size ], minval = 0.1, maxval = 0.9 ) )
+            self.embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.emb_size, ], stddev = 1.0 / math.sqrt(self.emb_size) ) , name='embeddings' )
+            self.variable_summaries(self.embeddings)
+            self.nce_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.num_units ], stddev = 1.0 / math.sqrt(self.num_units) ) , name='nce_weights' )
+            self.nce_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size ], minval = 0.1, maxval = 0.9 ) , name='nce_biases' )
     def create_lstm_cell(self):
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
@@ -115,13 +127,11 @@ class my_autoencoder(object):
                 state_is_tuple=True,
                 activation=tf.tanh,
             )
-            # tf.summary.histogram("lstm" + str(self.lstms), ret)
             return ret
     def create_gru_cell(self):
         with tf.variable_scope("gru" + str(self.grus)):
             self.grus += 1
             ret = tf.contrib.rnn.GRUCell( num_units = self.num_units, input_size=None, activation=tf.tanh )
-            # tf.summary.histogram("gru" + str(self.grus), ret)
             return ret
     def create_stack(self):
         cells = [
@@ -165,8 +175,10 @@ class my_autoencoder(object):
                     dtype               = tf.float32,
                     parallel_iterations = None,
                 )
-                tf.summary.histogram("encoder_state", self.encoder_state)
-                tf.summary.histogram("encoder_outputs", self.encoder_outputs)
+                with tf.name_scope('encoder_state'):
+                    self.variable_summaries(self.encoder_state)
+                with tf.name_scope('encoder_outputs'):
+                    self.variable_summaries(self.encoder_outputs)
         with tf.name_scope('decoder'):
             with tf.device('/gpu:1'):
                 decode_input = [
@@ -179,12 +191,13 @@ class my_autoencoder(object):
                     cell            = self.create_stack(),
                     loop_function   = None,
                 )
-                tf.summary.histogram("decoder_state", self.decoder_state)
-                tf.summary.histogram("decoder_outputs", self.decoder_outputs)
+                with tf.name_scope('decoder_state'):
+                    self.variable_summaries(self.decoder_state)
+                with tf.name_scope('decoder_outputs'):
+                    self.variable_summaries(self.decoder_outputs)
         with tf.name_scope('loss'):
             with tf.device('/gpu:0'):
                 self.compute_loss()
-                # self.compute_loss_with_while()
                 tf.summary.scalar('sum_of_nce_losses',self.loss)
         with tf.name_scope('optimizer'):
             with tf.device('/gpu:1'):
@@ -261,6 +274,52 @@ ae = my_autoencoder(
     learning_rate   = lr,
 )
 
+sess = tf.Session(config=get_config())
+merge_summary = tf.summary.merge_all()
+writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
+sess.run(tf.global_variables_initializer())
+saver = tf.train.Saver()
+
+def yield_data(p):
+    fs = os.listdir(p)
+    ret = None
+    for f in fs:
+        d = pickle.load(open(p+f,'rb'))
+        if(ret is None):
+            ret = d['context']
+        else:
+            ret = np.append(ret, d['context'], axis=0)
+        if(ret.shape[0] == b_size):
+            yield ret
+            ret = None
+i = 0
+for epoch in range(30):
+    #
+    sum_cost, m_batches = 0. , 0.
+    for train_dato in yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/'):
+        m_batches+=1
+        _, lll, ms = sess.run( [ ae.optimizer, ae.loss, merge_summary, ], feed_dict = { ae.inputs : train_dato, ae.lengths : (train_dato != 0).sum(1), },)
+        i+=1
+        writer.add_summary(ms, i)
+        sum_cost += lll
+        logger.info( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+        print( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    #
+    sum_cost, m_batches = 0. , 0.
+    for valid_dato in yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/'):
+        m_batches+=1
+        _, lll = sess.run( [ ae.optimizer, ae.loss ], feed_dict = { ae.inputs : valid_dato, ae.lengths : (valid_dato != 0).sum(1), },)
+        sum_cost += lll
+    logger.info( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    print( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    #
+    save_path = saver.save(sess, './my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
+    logger.info('save_path: {}'.format( save_path ))
+    meta_graph_def = tf.train.export_meta_graph(filename = './my_limited_model_'+str(epoch)+'.meta')
+
+sess.close()
+
+
 '''
 X = np.random.randint(vocab_size, size=(b_size, timesteps))
 lens = (X != 0).sum(1)
@@ -291,48 +350,6 @@ exit()
 
 p = '/home/dpappas/koutsouremeno_dataset/train/'
 '''
-
-sess = tf.Session(config=get_config())
-sess.run(tf.global_variables_initializer())
-saver = tf.train.Saver()
-
-def yield_data(p):
-    fs = os.listdir(p)
-    ret = None
-    for f in fs:
-        d = pickle.load(open(p+f,'rb'))
-        if(ret is None):
-            ret = d['context']
-        else:
-            ret = np.append(ret, d['context'], axis=0)
-        if(ret.shape[0] == b_size):
-            yield ret
-            ret = None
-
-for epoch in range(20):
-    #
-    sum_cost, m_batches = 0. , 0.
-    for train_dato in yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/'):
-        m_batches+=1
-        _, lll = sess.run( [ ae.optimizer, ae.loss ], feed_dict = { ae.inputs : train_dato, ae.lengths : (train_dato != 0).sum(1), },)
-        sum_cost += lll
-        logger.info( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-        print( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-    #
-    sum_cost, m_batches = 0. , 0.
-    for valid_dato in yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/'):
-        m_batches+=1
-        _, lll = sess.run( [ ae.optimizer, ae.loss ], feed_dict = { ae.inputs : valid_dato, ae.lengths : (valid_dato != 0).sum(1), },)
-        sum_cost += lll
-    logger.info( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-    print( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-    #
-    save_path = saver.save(sess, './my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
-    logger.info('save_path: {}'.format( save_path ))
-    meta_graph_def = tf.train.export_meta_graph(filename = './my_limited_model_'+str(epoch)+'.meta')
-
-sess.close()
-
 
 '''
 import pickle
@@ -378,7 +395,6 @@ encoder_outputs, encoder_state = tf.nn.dynamic_rnn(stacked_lstm,ttt, dtype=tf.fl
 tf.trainable_variables()
 
 
-
 '''
 
 
@@ -391,5 +407,7 @@ t = '/media/dpappas/dpappas_data/biomedical/my_koutsour_vocab_final.p'      # 10
 import cPickle as pickle
 v = pickle.load(open(t,'rb'))
 
+
+#tensorboard --logdir=/tmp/teacher_stacked/1
 
 '''
