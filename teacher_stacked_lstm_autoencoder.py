@@ -295,6 +295,11 @@ def yield_data(p):
 
 i = 0
 
+save_path = saver.save(sess, '/tmp/teacher_stacked/1/my_stacked_gru_autoencoder_default.ckpt')
+logger.info('save_path: {}'.format(save_path))
+meta_graph_def = tf.train.export_meta_graph(filename='/tmp/teacher_stacked/1/my_limited_model_default.meta')
+logger.info('meta_graph_def: {}'.format(meta_graph_def))
+
 for epoch in range(30):
     #
     sum_cost, m_batches = 0. , 0.
@@ -318,6 +323,7 @@ for epoch in range(30):
     save_path = saver.save(sess, '/tmp/teacher_stacked/1/my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
     logger.info('save_path: {}'.format( save_path ))
     meta_graph_def = tf.train.export_meta_graph(filename = '/tmp/teacher_stacked/1/my_limited_model_'+str(epoch)+'.meta')
+    logger.info('meta_graph_def: {}'.format(meta_graph_def))
 
 
 sess.close()
