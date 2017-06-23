@@ -1,4 +1,22 @@
 
+# vocab_size  = 1500000
+# b_size      = 20
+# timesteps   = 400
+# emb_size    = 200
+# num_units   = 300
+# stack_size  = 3
+# num_sampled = 10
+# lr          = 1
+
+# vocab_size  = 1500000
+# b_size      = 400
+# timesteps   = 20
+# emb_size    = 200
+# num_units   = 600
+# stack_size  = 1
+# num_sampled = 64
+# lr          = 1.0
+
 import numpy as np
 import tensorflow as tf
 import os
@@ -12,32 +30,14 @@ np.random.seed(1989)
 print tf.__version__   # THIS SHOULD BE 1.1.0
 print_every_n_batches = 500
 
-# vocab_size  = 1500000
-# b_size      = 20
-# timesteps   = 400
-# emb_size    = 200
-# num_units   = 300
-# stack_size  = 3
-# num_sampled = 10
-# lr          = 1
-
-vocab_size  = 2500000
-b_size      = 4000
+vocab_size  = 1500000
+b_size      = 100
 timesteps   = 400
 emb_size    = 200
 num_units   = 600
 stack_size  = 1
 num_sampled = 64
 lr          = 0.1
-
-# vocab_size  = 1500000
-# b_size      = 400
-# timesteps   = 20
-# emb_size    = 200
-# num_units   = 600
-# stack_size  = 1
-# num_sampled = 64
-# lr          = 1.0
 
 import logging
 logger = logging.getLogger('stacked_gru_autoencoder')
@@ -86,9 +86,9 @@ class my_autoencoder(object):
             self.embed      = tf.nn.embedding_lookup(self.embeddings, self.inputs)
             # print self.embed.get_shape()
         self.create_model_1()
-    def variable_summaries(self,var):
+    def variable_summaries(self,var,namescope):
         """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
-        with tf.name_scope('summaries'):
+        with tf.name_scope(namescope):
             mean = tf.reduce_mean(var)
             tf.summary.scalar('mean', mean)
             with tf.name_scope('stddev'):
@@ -107,9 +107,11 @@ class my_autoencoder(object):
             # self.nce_weights = tf.Variable( initial_value = tf.random_uniform( shape = [ self.vocab_size, self.num_units ], minval = -1.0, maxval = 1.0, ) )
             # self.nce_biases = tf.Variable( initial_value = tf.zeros( shape = [ self.vocab_size ] ) )
             self.embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.emb_size, ], stddev = 1.0 / math.sqrt(self.emb_size) ) , name='embeddings' )
-            self.variable_summaries(self.embeddings)
+            self.variable_summaries(self.embeddings, 'embeddings')
             self.nce_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.num_units ], stddev = 1.0 / math.sqrt(self.num_units) ) , name='nce_weights' )
+            self.variable_summaries(self.nce_weights, 'nce_weights')
             self.nce_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size ], minval = 0.1, maxval = 0.9 ) , name='nce_biases' )
+            self.variable_summaries(self.nce_biases, 'nce_biases')
     def create_lstm_cell(self):
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
@@ -175,10 +177,9 @@ class my_autoencoder(object):
                     dtype               = tf.float32,
                     parallel_iterations = None,
                 )
-                with tf.name_scope('encoder_state'):
-                    self.variable_summaries(self.encoder_state)
-                with tf.name_scope('encoder_outputs'):
-                    self.variable_summaries(self.encoder_outputs)
+            with tf.device('/cpu:0'):
+                self.variable_summaries(self.encoder_state,'encoder_state')
+                self.variable_summaries(self.encoder_outputs, 'encoder_outputs')
         with tf.name_scope('decoder'):
             with tf.device('/gpu:1'):
                 decode_input = [
@@ -191,10 +192,9 @@ class my_autoencoder(object):
                     cell            = self.create_stack(),
                     loop_function   = None,
                 )
-                with tf.name_scope('decoder_state'):
-                    self.variable_summaries(self.decoder_state)
-                with tf.name_scope('decoder_outputs'):
-                    self.variable_summaries(self.decoder_outputs)
+            with tf.device('/cpu:0'):
+                self.variable_summaries(self.decoder_state, 'decoder_state')
+                self.variable_summaries(self.decoder_outputs, 'decoder_outputs')
         with tf.name_scope('loss'):
             with tf.device('/gpu:0'):
                 self.compute_loss()
@@ -318,6 +318,7 @@ for epoch in range(30):
     save_path = saver.save(sess, '/tmp/teacher_stacked/1/my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
     logger.info('save_path: {}'.format( save_path ))
     meta_graph_def = tf.train.export_meta_graph(filename = '/tmp/teacher_stacked/1/my_limited_model_'+str(epoch)+'.meta')
+
 
 sess.close()
 
