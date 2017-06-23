@@ -21,23 +21,23 @@ print_every_n_batches = 500
 # num_sampled = 10
 # lr          = 1
 
-# vocab_size  = 2500000
-# b_size      = 4000
-# timesteps   = 400
-# emb_size    = 200
-# num_units   = 600
-# stack_size  = 1
-# num_sampled = 64
-# lr          = 0.1
-
-vocab_size  = 1500000
-b_size      = 400
-timesteps   = 20
+vocab_size  = 2500000
+b_size      = 4000
+timesteps   = 400
 emb_size    = 200
 num_units   = 600
 stack_size  = 1
 num_sampled = 64
-lr          = 1.0
+lr          = 0.1
+
+# vocab_size  = 1500000
+# b_size      = 400
+# timesteps   = 20
+# emb_size    = 200
+# num_units   = 600
+# stack_size  = 1
+# num_sampled = 64
+# lr          = 1.0
 
 import logging
 logger = logging.getLogger('stacked_gru_autoencoder')
@@ -292,7 +292,9 @@ def yield_data(p):
         if(ret.shape[0] == b_size):
             yield ret
             ret = None
+
 i = 0
+
 for epoch in range(30):
     #
     sum_cost, m_batches = 0. , 0.
@@ -313,9 +315,9 @@ for epoch in range(30):
     logger.info( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
     print( 'valid b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(lll), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
     #
-    save_path = saver.save(sess, './my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
+    save_path = saver.save(sess, '/tmp/teacher_stacked/1/my_stacked_gru_autoencoder_'+str(epoch)+'.ckpt')
     logger.info('save_path: {}'.format( save_path ))
-    meta_graph_def = tf.train.export_meta_graph(filename = './my_limited_model_'+str(epoch)+'.meta')
+    meta_graph_def = tf.train.export_meta_graph(filename = '/tmp/teacher_stacked/1/my_limited_model_'+str(epoch)+'.meta')
 
 sess.close()
 
