@@ -31,13 +31,13 @@ print tf.__version__   # THIS SHOULD BE 1.1.0
 print_every_n_batches = 500
 
 vocab_size  = 1500000
-b_size      = 100
+b_size      = 200
 timesteps   = 400
 emb_size    = 200
 num_units   = 600
 stack_size  = 1
 num_sampled = 64
-lr          = 0.1
+lr          = 1.0
 
 import logging
 logger = logging.getLogger('stacked_gru_autoencoder')
@@ -88,15 +88,16 @@ class my_autoencoder(object):
         self.create_model_1()
     def variable_summaries(self,var,namescope):
         """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
-        with tf.name_scope(namescope):
-            mean = tf.reduce_mean(var)
-            tf.summary.scalar('mean', mean)
-            with tf.name_scope('stddev'):
-                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-            tf.summary.scalar('stddev', stddev)
-            tf.summary.scalar('max', tf.reduce_max(var))
-            tf.summary.scalar('min', tf.reduce_min(var))
-            tf.summary.histogram('histogram', var)
+        with tf.device('/cpu:0'):
+            with tf.name_scope(namescope):
+                mean = tf.reduce_mean(var)
+                tf.summary.scalar('mean', mean)
+                with tf.name_scope('stddev'):
+                    stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+                tf.summary.scalar('stddev', stddev)
+                tf.summary.scalar('max', tf.reduce_max(var))
+                tf.summary.scalar('min', tf.reduce_min(var))
+                tf.summary.histogram('histogram', var)
     def init_variables(self):
         self.global_step = tf.Variable( initial_value = 0, trainable = False, )
         self.go = tf.Variable( initial_value=tf.random_uniform( shape=[ self.emb_size, ], minval=-1.0, maxval=1.0, ), dtype=tf.float32, name="GO", )
@@ -198,6 +199,7 @@ class my_autoencoder(object):
         with tf.name_scope('loss'):
             with tf.device('/gpu:0'):
                 self.compute_loss()
+            with tf.device('/cpu:0'):
                 tf.summary.scalar('sum_of_nce_losses',self.loss)
         with tf.name_scope('optimizer'):
             with tf.device('/gpu:1'):
@@ -275,7 +277,10 @@ ae = my_autoencoder(
 )
 
 sess = tf.Session(config=get_config())
-merge_summary = tf.summary.merge_all()
+
+with tf.device('/cpu:0'):
+    merge_summary = tf.summary.merge_all()
+
 writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
 sess.run(tf.global_variables_initializer())
 saver = tf.train.Saver()
