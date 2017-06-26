@@ -34,7 +34,6 @@ timesteps   = 4
 emb_size    = 100
 num_units   = 200
 stack_size  = 1
-num_sampled = 10
 lr          = 1.00
 
 print tf.__version__   # THIS SHOULD BE 1.1.0
@@ -65,7 +64,6 @@ class my_autoencoder(object):
             vocab_size,
             num_units,
             stack_size,
-            nce_num_sampled,
             learning_rate,
             momentum        = 0.8,
     ):
@@ -73,7 +71,6 @@ class my_autoencoder(object):
         self.emb_size       = emb_size
         self.timesteps      = timesteps
         self.vocab_size     = vocab_size
-        self.num_sampled    = nce_num_sampled
         self.lstms          = 0
         self.grus           = 0
         self.momentum       = momentum
@@ -105,15 +102,32 @@ class my_autoencoder(object):
         self.go = tf.stack(b_size * [self.go])
         # print self.go.get_shape()
         with tf.device('/cpu:0'):
-            # self.embeddings = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size, self.emb_size, ], minval = -1.0, maxval = 1.0, ) )
-            # self.nce_weights = tf.Variable( initial_value = tf.random_uniform( shape = [ self.vocab_size, self.num_units ], minval = -1.0, maxval = 1.0, ) )
-            # self.nce_biases = tf.Variable( initial_value = tf.zeros( shape = [ self.vocab_size ] ) )
             self.embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.emb_size, ], stddev = 1.0 / math.sqrt(self.emb_size) ) , name='embeddings' )
             self.variable_summaries(self.embeddings, 'embeddings')
-            self.nce_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ self.vocab_size, self.num_units ], stddev = 1.0 / math.sqrt(self.num_units) ) , name='nce_weights' )
-            self.variable_summaries(self.nce_weights, 'nce_weights')
-            self.nce_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ self.vocab_size ], minval = 0.1, maxval = 0.9 ) , name='nce_biases' )
-            self.variable_summaries(self.nce_biases, 'nce_biases')
+            self.out_weights = self.timesteps * [
+                tf.Variable(
+                    initial_value=tf.truncated_normal(
+                        shape=[
+                            self.num_units,
+                            self.vocab_size,
+                        ],
+                        stddev=1.0 / math.sqrt(self.num_units)
+                    ),
+                    name='out_weights'
+                )
+            ]
+            self.out_biases = self.timesteps * [
+                tf.Variable(
+                    initial_value = tf.random_uniform(
+                        shape = [
+                            self.vocab_size
+                        ],
+                        minval = 0.1,
+                        maxval = 0.9
+                    ),
+                    name='out_biases'
+                )
+            ]
     def create_lstm_cell(self):
         with tf.variable_scope("lstm" + str(self.lstms)):
             self.lstms += 1
@@ -202,30 +216,28 @@ class my_autoencoder(object):
                 # self.compute_loss()
                 self.compute_loss_with_while()
             with tf.device('/cpu:0'):
-                tf.summary.scalar('sum_of_nce_losses',self.loss)
+                tf.summary.scalar('sum_of_losses',self.loss)
         with tf.name_scope('optimizer'):
             with tf.device('/gpu:1'):
                 self.create_optimizer('sgd', '')
-                # self.create_optimizer('adam', 'norm')
-                # self.create_optimizer('momentum', 'norm')
     def body(self,i, lllll):
         l = tf.reduce_mean(
-            tf.nn.nce_loss(
-                weights=self.nce_weights,
-                biases=self.nce_biases,
-                labels=tf.reshape(
-                    tf.gather(
-                        self.inn,
-                        i
+            tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.contrib.layers.one_hot_encoding(
+                    labels=tf.reshape(
+                        tf.gather(
+                            self.inn,
+                            i
+                        ),
+                        [-1, 1]
                     ),
-                    [-1, 1]
+                    num_classes=self.vocab_size,
                 ),
-                inputs=tf.gather(
-                    self.decoder_outputs,
-                    i,
+                logits=(
+                    (
+                        tf.matmul(self.decoder_outputs[i], tf.gather(tf.stack(self.out_weights), i))
+                    ) + tf.gather(tf.stack(self.out_biases), i)
                 ),
-                num_sampled=self.num_sampled,
-                num_classes=self.vocab_size,
             )
         )
         lllll += l
@@ -256,15 +268,28 @@ class my_autoencoder(object):
         inn = tf.transpose(inn, [1, 0])
         for i in range(len(self.decoder_outputs)):
             l = tf.reduce_mean(
-                tf.nn.nce_loss(
-                    weights     = self.nce_weights,
-                    biases      = self.nce_biases,
-                    labels      = tf.reshape(inn[i], [-1, 1]),
-                    inputs      = self.decoder_outputs[i],
-                    num_sampled = self.num_sampled,
-                    num_classes = self.vocab_size,
+                tf.nn.softmax_cross_entropy_with_logits(
+                    labels= tf.contrib.layers.one_hot_encoding(
+                        labels = tf.reshape(inn[i], [-1, 1]),
+                        num_classes = self.vocab_size,
+                    ),
+                    logits= (
+                        (
+                            tf.matmul(self.decoder_outputs[i], self.out_weights[i])
+                        ) + self.out_biases[i]
+                    ),
                 )
             )
+            # l = tf.reduce_mean(
+            #     tf.nn.nce_loss(
+            #         weights     = self.nce_weights,
+            #         biases      = self.nce_biases,
+            #         labels      = tf.reshape(inn[i], [-1, 1]),
+            #         inputs      = self.decoder_outputs[i],
+            #         num_sampled = self.num_sampled,
+            #         num_classes = self.vocab_size,
+            #     )
+            # )
             self.loss += l
 
 ae = my_autoencoder(
@@ -274,7 +299,6 @@ ae = my_autoencoder(
     vocab_size      = vocab_size,
     num_units       = num_units,
     stack_size      = stack_size,
-    nce_num_sampled = num_sampled,
     learning_rate   = lr,
 )
 
@@ -369,65 +393,4 @@ sess.close()
 exit()
 
 p = '/home/dpappas/koutsouremeno_dataset/train/'
-'''
-
-'''
-import pickle
-import os
-p = '/home/dpappas/koutsouremeno_dataset/train/'
-fs = os.listdir(p)
-maxx = 0
-for f in fs:
-    d = pickle.load(open(p+f,'rb'))
-    print d['context'].max()
-    break
-d['context'].shape # 100, 500
-d['quests'].shape
-c_len = (d['context'] != 0).sum(1)
-q_len = (d['quests'] != 0).sum(1)
-# the predicate for stopping the while loop. Tensorflow demands that we have
-# all of the variables used in the while loop in the predicate.
-pred = lambda prob,counter,state,input,acc_states,acc_output,acc_probs:\
-    tf.logical_and(tf.less(prob,self.one_minus_eps), tf.less(counter,self.N))
-def ACTStep(self,prob, counter, state, input, acc_states, acc_outputs, acc_probs):
-    #
-    #run rnn once
-    output, new_state = rnn.rnn(self.cell, [input], state, scope=type(self.cell).__name__)
-    #
-    prob_w = tf.get_variable("prob_w", [self.cell.input_size,1]) 
-    prob_b = tf.get_variable("prob_b", [1])
-    halting_probability = tf.nn.sigmoid(tf.matmul(prob_w,new_state) + prob_b) 
-    #
-    acc_states.append(new_state)
-    acc_outputs.append(output)
-    acc_probs.append(halting_probability) 
-    #
-    return [p + prob, counter + 1.0, new_state, input,acc_states,acc_outputs,acc_probs]
-
-
-import tensorflow as tf
-ttt = tf.Variable(tf.random_normal([10, 10, 10]))
-t = tf.contrib.rnn.core_rnn_cell.LSTMCell(10)
-c = tf.contrib.rnn.core_rnn_cell.DropoutWrapper(t)
-stacked_lstm = tf.contrib.rnn.core_rnn_cell.MultiRNNCell(cells = [c])
-encoder_outputs, encoder_state = tf.nn.dynamic_rnn(stacked_lstm,ttt, dtype=tf.float32)
-
-tf.trainable_variables()
-
-
-'''
-
-
-'''
-
-t = '/media/dpappas/dpappas_data/biomedical/my_bio_vocab.p'                 # 1061900
-t = '/media/dpappas/dpappas_data/biomedical/my_koutsour_vocab.p'            # 423154
-t = '/media/dpappas/dpappas_data/biomedical/my_koutsour_vocab_final.p'      # 1061900
-
-import cPickle as pickle
-v = pickle.load(open(t,'rb'))
-
-
-#tensorboard --logdir=/tmp/teacher_stacked/1
-
 '''
