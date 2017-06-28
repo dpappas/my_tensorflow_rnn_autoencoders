@@ -34,7 +34,7 @@ timesteps   = 4
 emb_size    = 100
 num_units   = 200
 stack_size  = 1
-lr          = 1.00
+lr          = 0.10
 
 print tf.__version__   # THIS SHOULD BE 1.1.0
 print_every_n_batches = 500
