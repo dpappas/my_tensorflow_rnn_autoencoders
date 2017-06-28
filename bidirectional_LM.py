@@ -46,11 +46,12 @@ def variable_summaries(var, namescope):
             tf.summary.histogram('histogram', var)
 
 vocab_size      = 1500000
-b_size          = 10
+b_size          = 1024
 emb_size        = 100
 num_units       = 100
 timesteps       = 4
 learning_rate   = 1.0
+num_sampled     = 64
 
 inputs  = tf.placeholder(tf.int32, shape=(None, timesteps))
 outputs = tf.placeholder(tf.int32, shape=(None))
@@ -69,6 +70,9 @@ bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirection
     dtype=tf.float32
 )
 
+# print len(bi_outputs)
+# print bi_outputs[0].get_shape()
+
 # variable_summaries(embeddings, 'embeddings')
 # variable_summaries(nce_weights, 'nce_weights')
 # variable_summaries(nce_biases, 'nce_biases')
@@ -76,12 +80,41 @@ bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirection
 # variable_summaries(output_state_fw, 'fw_state')
 # variable_summaries(output_state_bw, 'bw_state')
 
-o_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ 2*num_units, vocab_size ], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
-o_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
+# o_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ 2*num_units, vocab_size ], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
+# o_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
+# logits = tf.add(tf.matmul(bi_outputs[-1], o_weights), o_biases)
+# loss =  tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits( labels = tf.contrib.layers.one_hot_encoding(outputs, vocab_size), logits = logits, ) )
 
-logits = tf.add(tf.matmul(bi_outputs[-1], o_weights), o_biases)
+weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, 2*num_units], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
+biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
 
-loss =  tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits( labels = tf.contrib.layers.one_hot_encoding(outputs, vocab_size), logits = logits, ) )
+
+mode = 'train'
+if mode == "train":
+  loss = tf.reduce_mean(
+      tf.nn.sampled_softmax_loss(
+        weights                 = weights,
+        biases                  = biases,
+        labels                  = outputs,
+        inputs                  = bi_outputs[-1],
+        num_sampled             = num_sampled,
+        num_classes             = vocab_size,
+        num_true                = 1,
+        sampled_values          = None,
+        remove_accidental_hits  = True,
+        partition_strategy      = 'mod',
+        name                    = 'sampled_softmax_loss'
+      )
+  )
+elif mode == "eval":
+  logits = tf.matmul(inputs, tf.transpose(weights))
+  logits = tf.nn.bias_add(logits, biases)
+  labels_one_hot = tf.one_hot(outputs, vocab_size)
+  loss = tf.nn.softmax_cross_entropy_with_logits(
+      labels=labels_one_hot,
+      logits=logits
+  )
+
 
 # train_op = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(loss)
 
