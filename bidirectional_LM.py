@@ -45,56 +45,64 @@ def variable_summaries(var, namescope):
             tf.summary.scalar('min', tf.reduce_min(var))
             tf.summary.histogram('histogram', var)
 
-vocab_size  = 1500000
-b_size      = 10
-emb_size    = 100
-num_units   = 100
-timesteps   = 4
+vocab_size      = 1500000
+b_size          = 10
+emb_size        = 100
+num_units       = 100
+timesteps       = 4
+learning_rate   = 1.0
 
 inputs  = tf.placeholder(tf.int32, shape=(None, timesteps))
-outputs = tf.placeholder(tf.int32, shape=(None,))
+outputs = tf.placeholder(tf.int32, shape=(None))
 
 embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, emb_size, ], stddev = 1.0 / math.sqrt(emb_size) ) , name='embeddings' )
-variable_summaries(embeddings, 'embeddings')
-nce_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, num_units ], stddev = 1.0 / math.sqrt(num_units) ) , name='nce_weights' )
-variable_summaries(nce_weights, 'nce_weights')
-nce_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='nce_biases' )
-variable_summaries(nce_biases, 'nce_biases')
-
 embed = tf.nn.embedding_lookup(embeddings, inputs)
 input = tf.unstack(tf.transpose(embed, [1, 0, 2]))
 
-# grus = 0
-# def create_gru_cell():
-#     global grus
-#     with tf.variable_scope("gru" + str(grus)):
-#         grus += 1
-#         ret = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-#         return ret
-#
-# cells_fw = 3 * [create_gru_cell()]
-# # cells_fw = [tf.contrib.rnn.core_rnn_cell.MultiRNNCell(cells = cells_fw)]
-# #stacked_lstm = tf.contrib.rnn.core_rnn_cell.MultiRNNCell(cells = cells)
-# cells_bw = 3 * [create_gru_cell()]
-# # cells_fw = [tf.contrib.rnn.core_rnn_cell.MultiRNNCell(cells = cells_bw)]
-#
-# outputs, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_rnn(
-#     cells_fw,
-#     cells_bw,
-#     input,
-#     initial_states_fw=None,
-#     initial_states_bw=None,
-#     dtype=tf.float32,
-#     sequence_length=None,
-#     scope=None
-# )
+gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
 
-lstm_fw_cell = tf.contrib.rnn.BasicLSTMCell(num_units, forget_bias=1.0)
-lstm_bw_cell = tf.contrib.rnn.BasicLSTMCell(num_units, forget_bias=1.0)
+bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirectional_rnn(
+    gru_fw_cell,
+    gru_bw_cell,
+    input,
+    dtype=tf.float32
+)
 
-outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirectional_rnn(lstm_fw_cell, lstm_bw_cell, input, dtype=tf.float32)
+# variable_summaries(embeddings, 'embeddings')
+# variable_summaries(nce_weights, 'nce_weights')
+# variable_summaries(nce_biases, 'nce_biases')
+# variable_summaries(bi_outputs, 'bidirectional_outputs')
+# variable_summaries(output_state_fw, 'fw_state')
+# variable_summaries(output_state_bw, 'bw_state')
 
+o_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ 2*num_units, vocab_size ], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
+o_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
 
+logits = tf.add(tf.matmul(bi_outputs[-1], o_weights), o_biases)
 
+loss =  tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits( labels = tf.contrib.layers.one_hot_encoding(outputs, vocab_size), logits = logits, ) )
+
+# train_op = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(loss)
+
+train_op = tf.train.AdagradOptimizer( learning_rate, initial_accumulator_value=0.1, use_locking=False, name='Adagrad' ).minimize(loss)
+
+X = np.random.randint(vocab_size, size=(b_size, timesteps))
+Y = np.random.randint(vocab_size, size=(b_size, 1))
+
+sess    = tf.Session(config=get_config())
+# merge_summary = tf.summary.merge_all()
+# writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
+# writer.add_graph(sess.graph)
+sess.run(tf.global_variables_initializer())
+
+for i in range(1000):
+    _, l = sess.run(
+        [ train_op, loss ],
+        feed_dict={ inputs  : X, outputs : Y, },
+    )
+    print l
+
+sess.close()
 
 
