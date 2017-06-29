@@ -46,10 +46,10 @@ def variable_summaries(var, namescope):
             tf.summary.histogram('histogram', var)
 
 vocab_size      = 1500000
-b_size          = 1024
+b_size          = 2000
 emb_size        = 100
 num_units       = 100
-timesteps       = 4
+timesteps       = 5
 learning_rate   = 1.0
 num_sampled     = 64
 
@@ -114,7 +114,8 @@ elif mode == "eval":
       labels=labels_one_hot,
       logits=logits
   )
-
+else:
+    loss = None
 
 # train_op = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(loss)
 
