@@ -40,6 +40,7 @@ def yield_data(p,b_size):
     X = []
     Y = []
     fs = os.listdir(p)
+    m = 0
     for f in fs:
         d = pickle.load(open(p+f,'rb'))
         Xt, Yt   = manage_matrix(d['context'])
@@ -57,6 +58,8 @@ def yield_data(p,b_size):
             yield Xt, Yt
             X  = X[b_size:]
             Y  = Y[b_size:]
+        m+=1
+        print 'finished {} of {}.'.format(m,len(fs))
 
 def get_config():
     config = tf.ConfigProto()
@@ -173,7 +176,7 @@ for epoch in range(10):
 
 sess.close()
 
-
+# 53701170 instances total
 
 
 # X = np.random.randint(vocab_size, size=(b_size, timesteps))
