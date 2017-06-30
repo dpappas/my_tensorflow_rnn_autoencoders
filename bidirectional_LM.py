@@ -24,6 +24,40 @@ hdlr.setFormatter(formatter)
 logger.addHandler(hdlr)
 logger.setLevel(logging.INFO)
 
+def manage_matrix(matrix):
+    X = []
+    Y = []
+    for i in range(matrix.shape[0]):
+        for j in range(timesteps, matrix.shape[1]):
+            # print d['context'][i, j - timesteps:j], d['context'][i, j]
+            X.append(matrix[i, j - timesteps:j])
+            Y.append(matrix[i, j])
+            if (matrix[i, j] == 0):
+                break
+    return X,Y
+
+def yield_data(p,b_size):
+    X = []
+    Y = []
+    fs = os.listdir(p)
+    for f in fs:
+        d = pickle.load(open(p+f,'rb'))
+        Xt, Yt   = manage_matrix(d['context'])
+        X.extend(Xt)
+        Y.extend(Yt)
+        Xt, Yt = manage_matrix(d['quests'])
+        X.extend(Xt)
+        Y.extend(Yt)
+        while(len(X) > b_size):
+            Xt = X[:b_size]
+            Yt = Y[:b_size]
+            Xt = np.array(Xt)
+            Yt = np.array(Yt)
+            Yt = Yt.reshape(Yt.shape[0], 1)
+            yield Xt, Yt
+            X  = X[b_size:]
+            Y  = Y[b_size:]
+
 def get_config():
     config = tf.ConfigProto()
     config.allow_soft_placement = True
@@ -121,8 +155,7 @@ else:
 
 train_op = tf.train.AdagradOptimizer( learning_rate, initial_accumulator_value=0.1, use_locking=False, name='Adagrad' ).minimize(loss)
 
-X = np.random.randint(vocab_size, size=(b_size, timesteps))
-Y = np.random.randint(vocab_size, size=(b_size, 1))
+yie = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/',b_size)
 
 sess    = tf.Session(config=get_config())
 # merge_summary = tf.summary.merge_all()
@@ -130,13 +163,60 @@ sess    = tf.Session(config=get_config())
 # writer.add_graph(sess.graph)
 sess.run(tf.global_variables_initializer())
 
-for i in range(1000):
-    _, l = sess.run(
-        [ train_op, loss ],
-        feed_dict={ inputs  : X, outputs : Y, },
-    )
-    print l
+for epoch in range(10):
+    for xt,yt in yie:
+        _, l = sess.run(
+            [ train_op, loss ],
+            feed_dict={ inputs  : xt, outputs : yt, },
+        )
+        print epoch,l
 
 sess.close()
 
+
+
+
+# X = np.random.randint(vocab_size, size=(b_size, timesteps))
+# Y = np.random.randint(vocab_size, size=(b_size, 1))
+#
+# sess    = tf.Session(config=get_config())
+# # merge_summary = tf.summary.merge_all()
+# # writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
+# # writer.add_graph(sess.graph)
+# sess.run(tf.global_variables_initializer())
+#
+# for i in range(1000):
+#     _, l = sess.run(
+#         [ train_op, loss ],
+#         feed_dict={ inputs  : X, outputs : Y, },
+#     )
+#     print l
+#
+# sess.close()
+
+
+#
+# def all_data(p):
+#     X = []
+#     Y = []
+#     fs = os.listdir(p)
+#     m=0
+#     for f in fs:
+#         d = pickle.load(open(p+f,'rb'))
+#         Xt, Yt   = manage_matrix(d['context'])
+#         X.extend(Xt)
+#         Y.extend(Yt)
+#         Xt, Yt = manage_matrix(d['quests'])
+#         X.extend(Xt)
+#         Y.extend(Yt)
+#         m+=1
+#         print 'finished {} of {}.'.format(m,len(fs))
+#     X = np.array(X)
+#     Y = np.array(Y)
+#     Y = Y.reshape(Y.shape[0], 1)
+#     return X,Y
+#
+# yie = all_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/')
+# pickle.dump(yie[0], open('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/ngrams_X.p','wb'))
+# pickle.dump(yie[1], open('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/ngrams_Y.p','wb'))
 
