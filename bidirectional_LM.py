@@ -18,7 +18,7 @@ print_every_n_batches = 500
 
 import logging
 logger = logging.getLogger('bidir_LM_GRU')
-hdlr = logging.FileHandler('/home/dpappas/bidir_LM_GRU.log')
+hdlr = logging.FileHandler('/home/dpappas/bidir_LM_further_train__GRU.log')
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 hdlr.setFormatter(formatter)
 logger.addHandler(hdlr)
@@ -132,23 +132,25 @@ inputs, outputs, loss, train_op = create_model()
 
 
 sess = tf.Session(config=get_config())
+saver = tf.train.Saver()
+saver.restore(sess, './my_bidirectional_LM_model_9.ckpt')
+
 merge_summary = tf.summary.merge_all()
 
 loss_summary = tf.summary.scalar('loss',loss)
 
-train_writer = tf.summary.FileWriter('/tmp/bidirectional_LM/train')
-valid_writer = tf.summary.FileWriter('/tmp/bidirectional_LM/valid')
+train_writer = tf.summary.FileWriter('/tmp/bidirectional_LM_further_train_/train')
+valid_writer = tf.summary.FileWriter('/tmp/bidirectional_LM_further_train_/valid')
 
 train_writer.add_graph(sess.graph)
-sess.run(tf.global_variables_initializer())
-saver = tf.train.Saver()
+# sess.run(tf.global_variables_initializer())
 
 test_average_loss = tf.Variable(0.0)
 test_average_loss_summary = tf.summary.scalar('loss',test_average_loss)
 
 i = 0
 i2 = 0
-for epoch in range(10):
+for epoch in range(10,20):
     # training time
     yie = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/',b_size)
     sum_cost, m_batches = 0. , 0.
@@ -158,6 +160,7 @@ for epoch in range(10):
         train_writer.add_summary(ls, i)
         sum_cost += l
         print( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(l), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+        logger.info( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(l), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
         i+=1
     # validation time
     yie_valid = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/',b_size)
@@ -173,11 +176,13 @@ for epoch in range(10):
     valid_writer.add_summary(ls, i)
     #
     print( 'valid b:{} e:{}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    logger.info( 'valid b:{} e:{}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
     # saving time
-    save_path = saver.save(sess, './my_bidirectional_LM_model_'+str(epoch)+'.ckpt')
+    save_path = saver.save(sess, './my_bidirectional_LM_model_further_train_'+str(epoch)+'.ckpt')
     # logger.info('save_path: {}'.format( save_path ))
     print('save_path: {}'.format( save_path ))
-    meta_graph_def = tf.train.export_meta_graph(filename = './my_bidirectional_LM_model_'+str(epoch)+'.meta')
+    logger.info('save_path: {}'.format( save_path ))
+    meta_graph_def = tf.train.export_meta_graph(filename = './my_bidirectional_LM_model_further_train_'+str(epoch)+'.meta')
 
 sess.close()
 
