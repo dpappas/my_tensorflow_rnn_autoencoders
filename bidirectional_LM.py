@@ -90,94 +90,100 @@ timesteps       = 5
 learning_rate   = 1.0
 num_sampled     = 64
 
-inputs  = tf.placeholder(tf.int32, shape=(None, timesteps))
-outputs = tf.placeholder(tf.int32, shape=(None))
+def create_model():
+    inputs  = tf.placeholder(tf.int32, shape=(None, timesteps))
+    outputs = tf.placeholder(tf.int32, shape=(None))
+    #
+    embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, emb_size, ], stddev = 1.0 / math.sqrt(emb_size) ) , name='embeddings' )
+    embed = tf.nn.embedding_lookup(embeddings, inputs)
+    input = tf.unstack(tf.transpose(embed, [1, 0, 2]))
+    #
+    gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+    gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+    #
+    bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
+    #
+    weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, 2*num_units], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
+    biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
+    #
+    # variable_summaries(embeddings, 'embeddings')
+    # variable_summaries(weights, 'weights')
+    # variable_summaries(biases, 'biases')
+    # variable_summaries(bi_outputs, 'bidirectional_outputs')
+    # variable_summaries(output_state_fw, 'fw_state')
+    # variable_summaries(output_state_bw, 'bw_state')
+    #
+    mode = 'train'
+    if mode == "train":
+        loss = tf.reduce_mean( tf.nn.sampled_softmax_loss( weights = weights, biases = biases, labels = outputs, inputs = bi_outputs[-1], num_sampled = num_sampled, num_classes = vocab_size, num_true = 1, sampled_values = None, remove_accidental_hits = True, partition_strategy = 'mod', name = 'sampled_softmax_loss' ) )
+    elif mode == "eval":
+        logits = tf.matmul(inputs, tf.transpose(weights))
+        logits = tf.nn.bias_add(logits, biases)
+        labels_one_hot = tf.one_hot(outputs, vocab_size)
+        loss = tf.nn.softmax_cross_entropy_with_logits( labels=labels_one_hot, logits=logits )
+    else:
+        loss = None
+    #
+    train_op = tf.train.AdagradOptimizer( learning_rate, initial_accumulator_value=0.1, use_locking=False, name='Adagrad' ).minimize(loss)
+    #
+    return inputs, outputs, loss, train_op
 
-embeddings  = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, emb_size, ], stddev = 1.0 / math.sqrt(emb_size) ) , name='embeddings' )
-embed = tf.nn.embedding_lookup(embeddings, inputs)
-input = tf.unstack(tf.transpose(embed, [1, 0, 2]))
-
-gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-
-bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirectional_rnn(
-    gru_fw_cell,
-    gru_bw_cell,
-    input,
-    dtype=tf.float32
-)
-
-# print len(bi_outputs)
-# print bi_outputs[0].get_shape()
-
-# variable_summaries(embeddings, 'embeddings')
-# variable_summaries(nce_weights, 'nce_weights')
-# variable_summaries(nce_biases, 'nce_biases')
-# variable_summaries(bi_outputs, 'bidirectional_outputs')
-# variable_summaries(output_state_fw, 'fw_state')
-# variable_summaries(output_state_bw, 'bw_state')
-
-# o_weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ 2*num_units, vocab_size ], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
-# o_biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
-# logits = tf.add(tf.matmul(bi_outputs[-1], o_weights), o_biases)
-# loss =  tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits( labels = tf.contrib.layers.one_hot_encoding(outputs, vocab_size), logits = logits, ) )
-
-weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, 2*num_units], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
-biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
+inputs, outputs, loss, train_op = create_model()
 
 
-mode = 'train'
-if mode == "train":
-  loss = tf.reduce_mean(
-      tf.nn.sampled_softmax_loss(
-        weights                 = weights,
-        biases                  = biases,
-        labels                  = outputs,
-        inputs                  = bi_outputs[-1],
-        num_sampled             = num_sampled,
-        num_classes             = vocab_size,
-        num_true                = 1,
-        sampled_values          = None,
-        remove_accidental_hits  = True,
-        partition_strategy      = 'mod',
-        name                    = 'sampled_softmax_loss'
-      )
-  )
-elif mode == "eval":
-  logits = tf.matmul(inputs, tf.transpose(weights))
-  logits = tf.nn.bias_add(logits, biases)
-  labels_one_hot = tf.one_hot(outputs, vocab_size)
-  loss = tf.nn.softmax_cross_entropy_with_logits(
-      labels=labels_one_hot,
-      logits=logits
-  )
-else:
-    loss = None
+sess = tf.Session(config=get_config())
+merge_summary = tf.summary.merge_all()
 
-# train_op = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(loss)
+loss_summary = tf.summary.scalar('loss',loss)
 
-train_op = tf.train.AdagradOptimizer( learning_rate, initial_accumulator_value=0.1, use_locking=False, name='Adagrad' ).minimize(loss)
+train_writer = tf.summary.FileWriter('/tmp/bidirectional_LM/train')
+valid_writer = tf.summary.FileWriter('/tmp/bidirectional_LM/valid')
 
-yie = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/',b_size)
-
-sess    = tf.Session(config=get_config())
-# merge_summary = tf.summary.merge_all()
-# writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
-# writer.add_graph(sess.graph)
+train_writer.add_graph(sess.graph)
 sess.run(tf.global_variables_initializer())
+saver = tf.train.Saver()
 
+test_average_loss = tf.Variable(0.0)
+test_average_loss_summary = tf.summary.scalar('loss',test_average_loss)
+
+i = 0
+i2 = 0
 for epoch in range(10):
+    # training time
+    yie = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/',b_size)
+    sum_cost, m_batches = 0. , 0.
     for xt,yt in yie:
-        _, l = sess.run(
-            [ train_op, loss ],
-            feed_dict={ inputs  : xt, outputs : yt, },
-        )
-        print epoch,l
+        m_batches+=1
+        _, l, ls = sess.run( [ train_op, loss, loss_summary], feed_dict={ inputs  : xt, outputs : yt, }, )
+        train_writer.add_summary(ls, i)
+        sum_cost += l
+        print( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(l), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+        i+=1
+    # validation time
+    yie_valid = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/',b_size)
+    sum_cost, m_batches = 0. , 0.
+    for xt,yt in yie_valid:
+        m_batches+=1
+        l = sess.run( loss, feed_dict={ inputs  : xt, outputs : yt, }, )
+        sum_cost += l
+    # assign the average test loss to a variable
+    assign_op = test_average_loss.assign((sum_cost/(m_batches*1.0)))
+    sess.run(assign_op)
+    ls = sess.run( test_average_loss_summary )
+    valid_writer.add_summary(ls, i)
+    #
+    print( 'valid b:{} e:{}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
+    # saving time
+    save_path = saver.save(sess, './my_bidirectional_LM_model_'+str(epoch)+'.ckpt')
+    # logger.info('save_path: {}'.format( save_path ))
+    print('save_path: {}'.format( save_path ))
+    meta_graph_def = tf.train.export_meta_graph(filename = './my_bidirectional_LM_model_'+str(epoch)+'.meta')
 
 sess.close()
 
 # 53701170 instances total
 
+# tensorboard --logdir=/tmp/bidirectional_LM/1
 
 # X = np.random.randint(vocab_size, size=(b_size, timesteps))
 # Y = np.random.randint(vocab_size, size=(b_size, 1))
