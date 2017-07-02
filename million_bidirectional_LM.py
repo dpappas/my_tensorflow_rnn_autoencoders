@@ -12,6 +12,8 @@ tf.set_random_seed(1989)
 np.random.seed(1989)
 from nltk import word_tokenize
 from nltk import sent_tokenize
+from elasticsearch.helpers import scan
+import elasticsearch
 
 def check_numeric(w):
     try:
@@ -48,12 +50,13 @@ def get_ngrams(ind, n):
     return X, Y
 
 def yield_train_data(b_size, timesteps):
-    p = '/home/DATA/pubmed_open_data/pmc_per_year/2014/'
-    fs = [ p+f for f in os.listdir(p)]
-    p = '/home/DATA/pubmed_open_data/pmc_per_year/2015/'
-    fs.extend([ p+f for f in os.listdir(p)])
     p = '/home/DATA/pubmed_open_data/pmc_per_year/2016/'
-    fs.extend([ p+f for f in os.listdir(p)])
+    fs = [ p+f for f in os.listdir(p)]
+    # p = '/home/DATA/pubmed_open_data/pmc_per_year/2015/'
+    # fs.extend([ p+f for f in os.listdir(p)])
+    # p = '/home/DATA/pubmed_open_data/pmc_per_year/2014/'
+    # fs.extend([ p+f for f in os.listdir(p)])
+    fs = fs[:100000]
     X,Y = [],[]
     m = 0
     for file in fs:
@@ -73,7 +76,7 @@ def yield_train_data(b_size, timesteps):
 
 def yield_valid_data(b_size, timesteps):
     p = '/home/DATA/pubmed_open_data/pmc_per_year/2008/'
-    fs = [ p+f for f in os.listdir(p)]
+    fs = [ p+f for f in os.listdir(p)][:1000]
     X,Y = [],[]
     m = 0
     for file in fs:
@@ -90,6 +93,28 @@ def yield_valid_data(b_size, timesteps):
             Y = Y[b_size:]
         m+=1
         print 'file {} of {}'.format(m, len(fs))
+
+def yield_data_elk(b_size, timesteps, date_from, date_to):
+    bod = { "query" : { "constant_score" : { "filter" : { 'bool':{ "must" : [ { "range": { "DateCreated": { "gte": date_from, "lte": date_to, 'format':'yyyy-MM-dd HH:mm:ss' } } }, ] } } } } }
+    res = client.count(index = index, doc_type = doc_type, body = bod )
+    total = res['count']
+    # print total
+    scroll = scan( client, index=index, query=None, scroll=u'5m', raise_on_error=True, preserve_order=False, size=1000, request_timeout=45, clear_scroll=True )
+    X,Y, m = [],[],0
+    for res in scroll:
+        t = res['_source']['AbstractText'].lower().replace('\n',' ')#.decode('utf-8')
+        t = get_ngrams(handle_new_text(t), timesteps)
+        X.extend(t[0])
+        Y.extend(t[1])
+        while(len(X)>b_size):
+            x_ = np.array(X[:b_size])
+            y_ = np.array(Y[:b_size])
+            y_ = y_.reshape(y_.shape[0], 1)
+            yield x_, y_
+            X = X[b_size:]
+            Y = Y[b_size:]
+        m+=1
+        print 'file {} of {}'.format(m, total)
 
 def get_config():
     config = tf.ConfigProto()
@@ -111,11 +136,13 @@ def create_model():
     #
     with tf.device('/gpu:0'):
         gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+    with tf.device('/gpu:1'):
         gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+    with tf.device('/gpu:0'):
         bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
-        bi_outputs = tf.contrib.layers.batch_norm(bi_outputs, center=True, scale=True, is_training=True)
     #
     with tf.device('/cpu:0'):
+        bi_outputs = tf.contrib.layers.batch_norm(bi_outputs, center=True, scale=True, is_training=True)
         weights = tf.Variable( initial_value = tf.truncated_normal( shape = [ vocab_size, 2*num_units], stddev = 1.0 / math.sqrt(num_units) ) , name='o_weights' )
         biases = tf.Variable( initial_value  = tf.random_uniform( shape = [ vocab_size ], minval = 0.1, maxval = 0.9 ) , name='o_biases' )
     #
@@ -143,6 +170,12 @@ def create_model():
     #
     return inputs, outputs, loss, train_op
 
+# elasticsearch_ip = ''
+# index = 'pubmed_abstracts_0_1'
+# doc_type = 'abstract_0_1'
+# client = elasticsearch.Elasticsearch(elasticsearch_ip, verify_certs=True, timeout=45, max_retries=10, retry_on_timeout=True)
+# #AbstractText
+
 vocab = pickle.load(open('/home/dpappas/my_pmc_vocab.p','rb'))
 vocab.append('START')
 vocab.append('END')
@@ -165,7 +198,7 @@ logger.setLevel(logging.INFO)
 
 
 vocab_size      = 3500000
-b_size          = 10000
+b_size          = 600000
 emb_size        = 100
 num_units       = 200
 timesteps       = 5
@@ -189,8 +222,9 @@ test_average_loss_summary = tf.summary.scalar('loss',test_average_loss)
 i = 0
 i2 = 0
 
-for epoch in range(10):
+for epoch in range(20):
     yie = yield_train_data(b_size, timesteps)
+    # yie = yield_data_elk(b_size, timesteps, '1980-01-01 00:00:00', '2015-07-01 00:00:00')
     sum_cost, m_batches = 0. , 0.
     for xt,yt in yie:
         m_batches+=1
@@ -202,6 +236,7 @@ for epoch in range(10):
         i+=1
     # validation time
     yie_valid = yield_valid_data(b_size, timesteps)
+    # yie_valid = yield_data_elk(b_size, timesteps, '2015-07-01 00:00:00', '2016-01-01 00:00:00')
     sum_cost, m_batches = 0. , 0.
     for xt,yt in yie_valid:
         m_batches+=1
