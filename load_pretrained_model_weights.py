@@ -82,14 +82,6 @@ def variable_summaries(var, namescope):
             tf.summary.scalar('min', tf.reduce_min(var))
             tf.summary.histogram('histogram', var)
 
-vocab_size      = 1500000
-b_size          = 2000
-emb_size        = 100
-num_units       = 100
-timesteps       = 5
-learning_rate   = 1.0
-num_sampled     = 64
-
 def create_model():
     inputs  = tf.placeholder(tf.int32, shape=(None, timesteps))
     outputs = tf.placeholder(tf.int32, shape=(None))
@@ -126,111 +118,85 @@ def create_model():
     #
     train_op = tf.train.AdagradOptimizer( learning_rate, initial_accumulator_value=0.1, use_locking=False, name='Adagrad' ).minimize(loss)
     #
-    return inputs, outputs, loss, train_op
+    return inputs, outputs, loss, train_op, bi_outputs, output_state_fw, output_state_bw
 
-inputs, outputs, loss, train_op = create_model()
+vocab_size      = 1500000
+b_size          = 2000
+emb_size        = 100
+num_units       = 100
+timesteps       = 5
+learning_rate   = 1.0
+num_sampled     = 64
+
+
+inputs, outputs, loss, train_op, bi_outputs, output_state_fw, output_state_bw = create_model()
+
 
 
 sess = tf.Session(config=get_config())
 saver = tf.train.Saver()
-saver.restore(sess, './my_bidirectional_LM_model_9.ckpt')
+# saver.restore(sess, './my_bidirectional_LM_model_9.ckpt')
+saver.restore(sess, './my_bidirectional_LM_model_further_train_10.ckpt')
 
-merge_summary = tf.summary.merge_all()
+# X = np.random.randint(vocab_size, size=(b_size, timesteps))
+#
+# t = sess.run(
+#     bi_outputs,
+#     feed_dict = {
+#         inputs  : X
+#     }
+# )
 
-loss_summary = tf.summary.scalar('loss',loss)
 
-train_writer = tf.summary.FileWriter('/tmp/bidirectional_LM_further_train_/train')
-valid_writer = tf.summary.FileWriter('/tmp/bidirectional_LM_further_train_/valid')
-
-train_writer.add_graph(sess.graph)
-# sess.run(tf.global_variables_initializer())
-
-test_average_loss = tf.Variable(0.0)
-test_average_loss_summary = tf.summary.scalar('loss',test_average_loss)
-
-i = 0
-i2 = 0
-for epoch in range(10,12):
-    # training time
-    yie = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/',b_size)
-    sum_cost, m_batches = 0. , 0.
-    for xt,yt in yie:
-        m_batches+=1
-        _, l, ls = sess.run( [ train_op, loss, loss_summary], feed_dict={ inputs  : xt, outputs : yt, }, )
-        train_writer.add_summary(ls, i)
-        sum_cost += l
-        print( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(l), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-        logger.info( 'train b:{} e:{}. batch_cost is {}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format(l), '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-        i+=1
-    # validation time
-    yie_valid = yield_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/',b_size)
-    sum_cost, m_batches = 0. , 0.
-    for xt,yt in yie_valid:
-        m_batches+=1
-        l = sess.run( loss, feed_dict={ inputs  : xt, outputs : yt, }, )
-        sum_cost += l
-    # assign the average test loss to a variable
-    assign_op = test_average_loss.assign((sum_cost/(m_batches*1.0)))
-    sess.run(assign_op)
-    ls = sess.run( test_average_loss_summary )
-    valid_writer.add_summary(ls, i)
-    #
-    print( 'valid b:{} e:{}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-    logger.info( 'valid b:{} e:{}. average_cost is: {}.'.format( m_batches, epoch, '{0:.4f}'.format((sum_cost/(m_batches*1.0))), ) )
-    # saving time
-    save_path = saver.save(sess, './my_bidirectional_LM_model_further_train_'+str(epoch)+'.ckpt', max_to_keep = None)
-    # logger.info('save_path: {}'.format( save_path ))
-    print('save_path: {}'.format( save_path ))
-    logger.info('save_path: {}'.format( save_path ))
-    meta_graph_def = tf.train.export_meta_graph(filename = './my_bidirectional_LM_model_further_train_'+str(epoch)+'.meta')
+variables_names = [v.name for v in tf.trainable_variables()]
+values = sess.run(variables_names)
+weights = {}
+for k,v in zip(variables_names, values):
+    # print(k, v)
+    # print(k, v.shape)
+    weights[k] = v
 
 sess.close()
 
-# 53701170 instances total
+tf.reset_default_graph()
 
-# tensorboard --logdir=/tmp/bidirectional_LM/1
 
-# X = np.random.randint(vocab_size, size=(b_size, timesteps))
-# Y = np.random.randint(vocab_size, size=(b_size, 1))
-#
-# sess    = tf.Session(config=get_config())
-# # merge_summary = tf.summary.merge_all()
-# # writer  = tf.summary.FileWriter('/tmp/teacher_stacked/1')
-# # writer.add_graph(sess.graph)
-# sess.run(tf.global_variables_initializer())
-#
-# for i in range(1000):
-#     _, l = sess.run(
-#         [ train_op, loss ],
-#         feed_dict={ inputs  : X, outputs : Y, },
+timesteps = 400
+inputs  = tf.placeholder(tf.int32, shape=(None, timesteps))
+embeddings  = tf.Variable( initial_value = tf.constant(weights[u'embeddings:0']) , name='embeddings' )
+embed = tf.nn.embedding_lookup(embeddings, inputs)
+input = tf.unstack(tf.transpose(embed, [1, 0, 2]))
+gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+bi_outputs, output_state_fw, output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
+# pprint([v.name for v in tf.trainable_variables()])
+
+sess = tf.Session(config=get_config())
+
+for v in tf.trainable_variables():
+    for v in tf.trainable_variables():
+        tf.contrib.framework.get_variables_by_name(v.name.replace(':0',''))[0].load(weights[v.name], session=sess)
+        # tf.get_variable(v.name).load(weights[v.name], session=sess)
+        # init = tf.constant(weights[v.name])
+        # tf.get_variable(v.name.replace(':0',''), initializer=init).initializer.run(session=sess)
+
+variables_names = [v.name for v in tf.trainable_variables()]
+values = sess.run(variables_names)
+weights2 = {}
+for k,v in zip(variables_names, values):
+    # print(k, v)
+    # print(k, v.shape)
+    weights2[k] = v
+
+
+# if('bidir' in v.name):
+#     init = tf.constant(
+#         weights[v.name]
 #     )
-#     print l
-#
-# sess.close()
+#     tf.get_variable(
+#         v.name,
+#         initializer=init
+#     )
 
-
-#
-# def all_data(p):
-#     X = []
-#     Y = []
-#     fs = os.listdir(p)
-#     m=0
-#     for f in fs:
-#         d = pickle.load(open(p+f,'rb'))
-#         Xt, Yt   = manage_matrix(d['context'])
-#         X.extend(Xt)
-#         Y.extend(Yt)
-#         Xt, Yt = manage_matrix(d['quests'])
-#         X.extend(Xt)
-#         Y.extend(Yt)
-#         m+=1
-#         print 'finished {} of {}.'.format(m,len(fs))
-#     X = np.array(X)
-#     Y = np.array(Y)
-#     Y = Y.reshape(Y.shape[0], 1)
-#     return X,Y
-#
-# yie = all_data('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/')
-# pickle.dump(yie[0], open('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/ngrams_X.p','wb'))
-# pickle.dump(yie[1], open('/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/ngrams_Y.p','wb'))
+sess.close()
 
