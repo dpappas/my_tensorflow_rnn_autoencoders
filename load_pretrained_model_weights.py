@@ -167,7 +167,6 @@ tf.reset_default_graph()
 tf.set_random_seed(1989)
 np.random.seed(1989)
 import os
-import shutil
 
 
 def get_config():
@@ -253,12 +252,20 @@ for item in yie:
             tf.contrib.framework.get_variables_by_name(v.name.replace(':0',''))[0].load(weights[v.name.replace('bi1/','',1).replace('bi2/','',1)], session=sess)
         #
         td, tq = sess.run( [ doc_bi_outputs, quest_bi_outputs, ], feed_dict={ docs:context, quests:questions, } )
-        dato = { 'context': td, 'quests': tq, 'cands': candidates, 'targets': targets, }
+        dato = {
+            'context'       : td,
+            'quests'        : tq,
+            'cands'         : candidates,
+            'targets'       : targets,
+            'context_length': np.sum(context>1,axis=1),
+            'quest_length'  : np.sum(questions>1,axis=1),
+        }
         pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
+        m += 1
     else:
-        dato = { 'context': context, 'quests': questions, 'cands': candidates, 'targets': targets, }
-        pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
-    m +=1
+        None
+        # dato = { 'context': context, 'quests': questions, 'cands': candidates, 'targets': targets, }
+        # pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
     print(m)
 
 
