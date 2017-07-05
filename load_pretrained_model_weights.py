@@ -210,6 +210,7 @@ with tf.device('/gpu:0'):
         gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
         gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
         doc_bi_outputs, doc_output_state_fw, doc_output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
+        doc_bi_outputs = tf.stack(doc_bi_outputs)
         # pprint([v.name for v in tf.trainable_variables()])
 
 with tf.device('/gpu:1'):
@@ -218,6 +219,7 @@ with tf.device('/gpu:1'):
         gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
         gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
         quest_bi_outputs, quest_output_state_fw, quest_output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
+        quest_bi_outputs = tf.stack(quest_bi_outputs)
         # pprint([v.name for v in tf.trainable_variables()])
 
 
