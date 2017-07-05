@@ -167,6 +167,7 @@ tf.reset_default_graph()
 tf.set_random_seed(1989)
 np.random.seed(1989)
 import os
+import shutil
 
 
 def get_config():
@@ -204,19 +205,21 @@ quest_embeds = tf.nn.embedding_lookup(embeddings, quests)
 train_data_path = '/home/dpappas/koutsouremeno_dataset/train/'
 valid_data_path = '/home/dpappas/koutsouremeno_dataset/valid/'
 
-with tf.variable_scope('bi1'):
-    input = tf.unstack(tf.transpose(doc_embeds, [1, 0, 2]))
-    gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-    gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-    doc_bi_outputs, doc_output_state_fw, doc_output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
-    # pprint([v.name for v in tf.trainable_variables()])
+with tf.device('/gpu:0'):
+    with tf.variable_scope('bi1'):
+        input = tf.unstack(tf.transpose(doc_embeds, [1, 0, 2]))
+        gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+        gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+        doc_bi_outputs, doc_output_state_fw, doc_output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
+        # pprint([v.name for v in tf.trainable_variables()])
 
-with tf.variable_scope('bi2'):
-    input = tf.unstack(tf.transpose(quest_embeds, [1, 0, 2]))
-    gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-    gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
-    quest_bi_outputs, quest_output_state_fw, quest_output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
-    # pprint([v.name for v in tf.trainable_variables()])
+with tf.device('/gpu:1'):
+    with tf.variable_scope('bi2'):
+        input = tf.unstack(tf.transpose(quest_embeds, [1, 0, 2]))
+        gru_fw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+        gru_bw_cell = tf.contrib.rnn.GRUCell( num_units = num_units, input_size=None, activation=tf.tanh )
+        quest_bi_outputs, quest_output_state_fw, quest_output_state_bw = tf.contrib.rnn.static_bidirectional_rnn( gru_fw_cell, gru_bw_cell, input, dtype=tf.float32 )
+        # pprint([v.name for v in tf.trainable_variables()])
 
 
 sess = tf.Session(config=get_config())
@@ -228,35 +231,37 @@ sess = tf.Session(config=get_config())
 # train_data_path = '/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/'
 # valid_data_path = '/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/'
 
-train_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/train/'
+# train_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/train/'
 valid_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/valid/'
+
+export_valid_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset_after_LM/valid/'
+
+if not os.path.exists(export_valid_data_path):
+    os.makedirs(export_valid_data_path)
 
 # train_data_path = '/home/dpappas/koutsouremeno_dataset/train/'
 # valid_data_path = '/home/dpappas/koutsouremeno_dataset/valid/'
 
-yie = data_yielder(valid_data_path, 10000)
-ttt = yie.next()
-con = ttt[0]
-que = ttt[1]
+yie = data_yielder(valid_data_path, 11683)
 
-# pprint([v.name for v in tf.trainable_variables()])
+m = 0
+for item in yie:
+    context, questions, candidates, targets = item
+    if(len(context) != 400):
+        # RNN INITIALIZATION
+        for v in tf.trainable_variables():
+            tf.contrib.framework.get_variables_by_name(v.name.replace(':0',''))[0].load(weights[v.name.replace('bi1/','',1).replace('bi2/','',1)], session=sess)
+        #
+        td, tq = sess.run( [ doc_bi_outputs, quest_bi_outputs, ], feed_dict={ docs:context, quests:questions, } )
+        dato = { 'context': td, 'quests': tq, 'cands': candidates, 'targets': targets, }
+        pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
+    else:
+        dato = { 'context': context, 'quests': questions, 'cands': candidates, 'targets': targets, }
+        pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
+    m +=1
+    print(m)
 
-for v in tf.trainable_variables():
-    tf.contrib.framework.get_variables_by_name(v.name.replace(':0',''))[0].load(weights[v.name.replace('bi1/','',1).replace('bi2/','',1)], session=sess)
-    # tf.get_variable(v.name).load(weights[v.name], session=sess)
-    # init = tf.constant(weights[v.name])
-    # tf.get_variable(v.name.replace(':0',''), initializer=init).initializer.run(session=sess)
 
-td, tq = sess.run(
-    [
-        doc_bi_outputs,
-        quest_bi_outputs,
-    ],
-    feed_dict={
-        docs:con,
-        quests:que,
-    }
-)
 
 # variables_names = [v.name for v in tf.trainable_variables()]
 # values = sess.run(variables_names)
