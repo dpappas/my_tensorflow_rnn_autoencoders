@@ -257,8 +257,10 @@ for item in yie:
         #
         td, tq = sess.run( [ doc_bi_outputs, quest_bi_outputs, ], feed_dict={ docs:context, quests:questions, } )
         dato = {
-            'context'       : td,
-            'quests'        : tq,
+            'context_LM'    : td,
+            'quests_LM'     : tq,
+            'context'       : context,
+            'quests'        : questions,
             'cands'         : candidates,
             'targets'       : targets,
             'context_length': np.sum(context>1,axis=1),
