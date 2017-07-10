@@ -234,18 +234,22 @@ sess = tf.Session(config=get_config())
 # train_data_path = '/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/train/'
 # valid_data_path = '/media/dpappas/dpappas_data/biomedical/more_koutsouremeno_dataset/valid/'
 
-# train_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/train/'
-valid_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/valid/'
+# valid_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/valid/'
+# export_valid_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset_after_LM/valid/'
+# if not os.path.exists(export_valid_data_path):
+#     os.makedirs(export_valid_data_path)
 
-export_valid_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset_after_LM/valid/'
 
-if not os.path.exists(export_valid_data_path):
-    os.makedirs(export_valid_data_path)
+train_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset/train/'
+export_train_data_path = '/media/dpappas/dpappas_data/biomedical/koutsouremeno_dataset_after_LM/train/'
+if not os.path.exists(export_train_data_path):
+    os.makedirs(export_train_data_path)
 
 # train_data_path = '/home/dpappas/koutsouremeno_dataset/train/'
 # valid_data_path = '/home/dpappas/koutsouremeno_dataset/valid/'
 
-yie = data_yielder(valid_data_path, 11683)
+# yie = data_yielder(valid_data_path, 11683)
+yie = data_yielder(train_data_path, 40000)
 
 m = 0
 for item in yie:
@@ -266,7 +270,8 @@ for item in yie:
             'context_length': np.sum(context>1,axis=1),
             'quest_length'  : np.sum(questions>1,axis=1),
         }
-        pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
+        # pickle.dump(dato, open(export_valid_data_path+str(m)+'.p','wb'))
+        pickle.dump(dato, open(export_train_data_path+str(m)+'.p','wb'))
         m += 1
     else:
         None
